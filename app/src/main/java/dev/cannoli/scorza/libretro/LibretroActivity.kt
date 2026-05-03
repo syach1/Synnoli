@@ -67,6 +67,7 @@ class LibretroActivity : ComponentActivity() {
     @Inject lateinit var controllersViewModel: dev.cannoli.scorza.ui.viewmodel.ControllersViewModel
     @Inject lateinit var editButtonsController: dev.cannoli.scorza.input.EditButtonsController
     @Inject lateinit var mappingRepository: dev.cannoli.scorza.input.v2.repo.MappingRepository
+    @Inject lateinit var bindingController: dev.cannoli.scorza.input.BindingController
 
     private lateinit var runner: LibretroRunner
     private lateinit var renderer: LibretroRenderer
@@ -340,6 +341,7 @@ class LibretroActivity : ComponentActivity() {
         confirmButton = activeMappingHolder.active.value.confirmButton()
         buttonLabelSet = activeMappingHolder.active.value.labelSet(dev.cannoli.ui.ButtonLabelSet.PLUMBER)
         isRunning = true
+        wireBindingController()
         window.setBackgroundDrawableResource(android.R.color.black)
         goFullscreen()
         sessionLog.log("game_title=$gameTitle")
@@ -967,7 +969,7 @@ class LibretroActivity : ComponentActivity() {
                     "btn_up", "btn_down" -> infoScrollDir = 0
                 }
             }
-            handleShortcutKeyUp(keyCode)
+            bindingController.keyUp(keyCode)
             return true
         }
         val port = portRouter.portFor(event.deviceId) ?: 0
@@ -1984,47 +1986,37 @@ class LibretroActivity : ComponentActivity() {
 
     // --- Shortcuts ---
 
-    private val shortcutCountdownHandler = Handler(Looper.getMainLooper())
-    private val shortcutHoldMs = 1500
-    private val shortcutTickMs = 100L
-
-    private val shortcutCountdownRunnable = object : Runnable {
-        override fun run() {
-            val screen = currentScreen as? IGMScreen.Shortcuts ?: return
-            if (!screen.listening) return
-            val newMs = screen.countdownMs + shortcutTickMs.toInt()
-            if (newMs >= shortcutHoldMs) {
-                val action = ShortcutAction.entries[screen.selectedIndex - 1]
-                val chord = screen.heldKeys
-                val cleared = shortcuts.filterValues { it != chord }
-                shortcuts = cleared + (action to chord)
-                saveCurrentShortcuts()
-                replaceTop(screen.copy(listening = false, heldKeys = emptySet(), countdownMs = 0))
-            } else {
-                replaceTop(screen.copy(countdownMs = newMs))
-                shortcutCountdownHandler.postDelayed(this, shortcutTickMs)
+    private fun wireBindingController() {
+        bindingController.onProgress = { keys, elapsedMs ->
+            val cs = currentScreen
+            if (cs is IGMScreen.Shortcuts) {
+                replaceTop(cs.copy(heldKeys = keys, countdownMs = elapsedMs))
+            }
+        }
+        bindingController.onCommit = { chord ->
+            val cs = currentScreen
+            if (cs is IGMScreen.Shortcuts) {
+                // selectedIndex 0 is the source picker; actions start at 1.
+                val action = ShortcutAction.entries.getOrNull(cs.selectedIndex - 1)
+                if (action != null) {
+                    val cleared = shortcuts.filterValues { it != chord }
+                    shortcuts = cleared + (action to chord)
+                    saveCurrentShortcuts()
+                    replaceTop(cs.copy(listening = false, heldKeys = emptySet(), countdownMs = 0))
+                }
+            }
+        }
+        bindingController.onCancel = {
+            val cs = currentScreen
+            if (cs is IGMScreen.Shortcuts && cs.listening) {
+                replaceTop(cs.copy(listening = false, heldKeys = emptySet(), countdownMs = 0))
             }
         }
     }
 
-    private fun cancelShortcutListening() {
-        shortcutCountdownHandler.removeCallbacks(shortcutCountdownRunnable)
-        val screen = currentScreen as? IGMScreen.Shortcuts ?: return
-        if (screen.listening) replaceTop(screen.copy(listening = false, heldKeys = emptySet(), countdownMs = 0))
-    }
-
-    private fun handleShortcutKeyUp(keyCode: Int) {
-        val screen = currentScreen as? IGMScreen.Shortcuts ?: return
-        if (screen.listening && screen.heldKeys.contains(keyCode)) cancelShortcutListening()
-    }
-
     private fun handleShortcutsInput(screen: IGMScreen.Shortcuts, rawKeyCode: Int, button: String?): Boolean {
         if (screen.listening) {
-            if (screen.heldKeys.contains(rawKeyCode)) return true
-            val newKeys = screen.heldKeys + rawKeyCode
-            replaceTop(screen.copy(heldKeys = newKeys, countdownMs = 0))
-            shortcutCountdownHandler.removeCallbacks(shortcutCountdownRunnable)
-            shortcutCountdownHandler.postDelayed(shortcutCountdownRunnable, shortcutTickMs)
+            bindingController.keyDown(rawKeyCode)
             return true
         }
         val count = ShortcutAction.entries.size + 1
@@ -2046,6 +2038,7 @@ class LibretroActivity : ComponentActivity() {
             "btn_south" -> {
                 if (screen.selectedIndex > 0) {
                     replaceTop(screen.copy(listening = true, heldKeys = emptySet(), countdownMs = 0))
+                    bindingController.startListening()
                 }
                 true
             }

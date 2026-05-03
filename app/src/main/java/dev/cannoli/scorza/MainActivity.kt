@@ -123,7 +123,6 @@ class MainActivity : ComponentActivity(), ActivityActions {
     private var pendingBtPrompt = false
     private var coldStart = true
 
-    private fun cancelShortcutListening() = bindingController.cancelShortcutListening()
 
     private val storagePermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -496,7 +495,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
             inputTesterController.dispatchKey(event, down = true)
             return true
         }
-        if (bindingController.handleKeyDown(keyCode)) {
+        if (bindingController.keyDown(keyCode)) {
             return true
         }
         if (event.repeatCount > 0 && currentScreenForKey is LauncherScreen.ShortcutBinding && !currentScreenForKey.listening) {
@@ -525,8 +524,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
         if (inputDispatcher.handleKeyEvent(event)) {
             return true
         }
-        if (currentScreenForKey is LauncherScreen.ShortcutBinding && currentScreenForKey.listening && currentScreenForKey.heldKeys.contains(keyCode)) {
-            cancelShortcutListening()
+        if (bindingController.keyUp(keyCode)) {
             return true
         }
         return super.onKeyUp(keyCode, event)
@@ -592,13 +590,10 @@ class MainActivity : ComponentActivity(), ActivityActions {
         val wasHeld = deviceId in held
         if (value > 0.5f && !wasHeld) {
             held.add(deviceId)
-            bindingController.handleKeyDown(keyCode)
+            bindingController.keyDown(keyCode)
         } else if (value < 0.3f && wasHeld) {
             held.remove(deviceId)
-            val currentScreenForTrigger = nav.currentScreen
-            if (currentScreenForTrigger is LauncherScreen.ShortcutBinding && currentScreenForTrigger.listening && currentScreenForTrigger.heldKeys.contains(keyCode)) {
-                cancelShortcutListening()
-            }
+            bindingController.keyUp(keyCode)
         }
     }
 
@@ -725,9 +720,34 @@ class MainActivity : ComponentActivity(), ActivityActions {
             }
         }
 
-        router.cancelShortcutListening = { cancelShortcutListening() }
         router.unregisterCoreQueryReceiver = { unregisterCoreQueryReceiver() }
         router.wire(inputDispatcher)
+
+        bindingController.onProgress = { keys, elapsedMs ->
+            val cs = nav.currentScreen
+            if (cs is LauncherScreen.ShortcutBinding) {
+                nav.replaceTop(cs.copy(heldKeys = keys, countdownMs = elapsedMs))
+            }
+        }
+        bindingController.onCommit = { chord ->
+            val cs = nav.currentScreen
+            if (cs is LauncherScreen.ShortcutBinding) {
+                val action = dev.cannoli.igm.ShortcutAction.entries.getOrNull(cs.selectedIndex)
+                if (action != null) {
+                    val cleared = cs.shortcuts.filterValues { it != chord }
+                    nav.replaceTop(cs.copy(
+                        shortcuts = cleared + (action to chord),
+                        listening = false, heldKeys = emptySet(), countdownMs = 0,
+                    ))
+                }
+            }
+        }
+        bindingController.onCancel = {
+            val cs = nav.currentScreen
+            if (cs is LauncherScreen.ShortcutBinding && cs.listening) {
+                nav.replaceTop(cs.copy(listening = false, heldKeys = emptySet(), countdownMs = 0))
+            }
+        }
 
         nav.screenStack.clear()
         nav.screenStack.add(LauncherScreen.SystemList)

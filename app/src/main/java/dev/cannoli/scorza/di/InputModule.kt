@@ -7,19 +7,12 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.components.ActivityComponent
 import dagger.hilt.android.scopes.ActivityScoped
 import dev.cannoli.scorza.R
-import dev.cannoli.scorza.input.BindingController
 import dev.cannoli.scorza.input.InputTesterController
-import dev.cannoli.scorza.navigation.NavigationController
 import dev.cannoli.scorza.ui.viewmodel.InputTesterViewModel
 
 @Module
 @InstallIn(ActivityComponent::class)
 object InputModule {
-
-    @Provides @ActivityScoped
-    fun provideBindingController(
-        nav: NavigationController,
-    ): BindingController = BindingController(nav = nav)
 
     @Provides @ActivityScoped
     fun provideInputTesterController(

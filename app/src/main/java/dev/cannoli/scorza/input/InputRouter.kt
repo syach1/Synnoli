@@ -44,9 +44,9 @@ class InputRouter @Inject constructor(
     private val installedCoreService: InstalledCoreService,
     private val globalOverrides: GlobalOverridesManager,
     private val launcherActions: LauncherActions,
+    private val bindingController: BindingController,
     @ApplicationContext private val context: Context,
 ) {
-    var cancelShortcutListening: () -> Unit = {}
     var unregisterCoreQueryReceiver: () -> Unit = {}
 
     fun wire(dispatcher: InputDispatcher) {
@@ -241,10 +241,13 @@ class InputRouter @Inject constructor(
     private fun shortcutBindingHandler() = scrollable<LauncherScreen.ShortcutBinding>(
         onMove = { idx -> if (listening) this else copy(selectedIndex = idx) },
         onConfirm = {
-            if (!listening) nav.replaceTop(copy(listening = true, heldKeys = emptySet(), countdownMs = 0))
+            if (!listening) {
+                nav.replaceTop(copy(listening = true, heldKeys = emptySet(), countdownMs = 0))
+                bindingController.startListening()
+            }
         },
         onBack = {
-            cancelShortcutListening()
+            bindingController.stopListening()
             globalOverrides.saveShortcuts(shortcuts)
             nav.pop()
         },
