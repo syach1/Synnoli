@@ -52,7 +52,7 @@ object RetroArchAutoconfigImporter {
 
         for ((axisKey, ref) in entry.axisBindings) {
             val (canonical, role) = mapAxisKeyToCanonicalAndRole(axisKey) ?: continue
-            val (resting, activeMin, activeMax) = axisRange(ref.direction)
+            val (resting, activeMin, activeMax) = axisRange(ref.direction, role)
             bindings.getOrPut(canonical) { mutableListOf() }
                 .add(
                     InputBinding.Axis(
@@ -139,8 +139,16 @@ object RetroArchAutoconfigImporter {
         else -> null
     }
 
-    private fun axisRange(direction: Int): Triple<Float, Float, Float> =
-        if (direction >= 0) Triple(-1f, 0f, 1f) else Triple(1f, 0f, -1f)
+    private fun axisRange(direction: Int, role: AnalogRole): Triple<Float, Float, Float> {
+        // Trigger axes (DIGITAL_BUTTON) are unipolar: rest at 0, full press at +/-1. Mapping
+        // them as bipolar would normalize axis-at-rest to 0.5 -- past the 0.5 digital
+        // threshold but below the 0 baseline, so a trigger that just sits at rest reads as
+        // "barely pressed" forever. Stick axes stay bipolar.
+        if (role == AnalogRole.DIGITAL_BUTTON) {
+            return if (direction >= 0) Triple(0f, 0f, 1f) else Triple(0f, 0f, -1f)
+        }
+        return if (direction >= 0) Triple(-1f, 0f, 1f) else Triple(1f, 0f, -1f)
+    }
 
     private fun stableIdFor(
         device: ConnectedDevice,

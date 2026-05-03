@@ -61,8 +61,10 @@ class RetroArchAutoconfigImporterTest {
         val t = RetroArchAutoconfigImporter.import(entry, device, defaultHints)
         val l2 = t.bindings[CanonicalButton.BTN_L2]!![0] as InputBinding.Axis
         assertEquals(17, l2.axis)
-        // RA encodes +N as resting=-1, active 0..1 (the issue #151 case).
-        assertEquals(-1f, l2.restingValue, 0.001f)
+        // Trigger axes are unipolar: rest at 0, full press at +1 for direction=+1. A bipolar
+        // mapping would normalize axis-at-rest (0) to 0.5, past the 0.5 digital threshold,
+        // which would leave the trigger reading "barely pressed" forever.
+        assertEquals(0f, l2.restingValue, 0.001f)
         assertEquals(0f, l2.activeMin, 0.001f)
         assertEquals(1f, l2.activeMax, 0.001f)
         assertEquals(AnalogRole.DIGITAL_BUTTON, l2.analogRole)
