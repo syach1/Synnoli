@@ -41,7 +41,7 @@ class EditButtonsController @Inject constructor(
         firstEventAtMillis = -1
         capturedKeys.clear()
         capturedAxes.clear()
-        dev.cannoli.scorza.util.DebugLog.write("[edit] startListening mapping=${mapping.id} canonical=$canonical")
+        dev.cannoli.scorza.util.InputLog.write("[edit] startListening mapping=${mapping.id} canonical=$canonical")
     }
 
     fun cancelListening() {
@@ -57,7 +57,7 @@ class EditButtonsController @Inject constructor(
         if (keyCode == android.view.KeyEvent.KEYCODE_UNKNOWN) return
         if (firstEventAtMillis < 0) firstEventAtMillis = clock()
         capturedKeys.add(keyCode)
-        dev.cannoli.scorza.util.DebugLog.write("[edit] captureRawKeyEvent keyCode=$keyCode firstAt=$firstEventAtMillis now=${clock()}")
+        dev.cannoli.scorza.util.InputLog.write("[edit] captureRawKeyEvent keyCode=$keyCode firstAt=$firstEventAtMillis now=${clock()}")
     }
 
     fun captureRawAxisEvent(axisValues: Map<Int, Float>) {
@@ -76,12 +76,12 @@ class EditButtonsController @Inject constructor(
         val now = clock()
 
         if (firstEventAtMillis < 0 && now - startedAtMillis >= CAPTURE_TIMEOUT_MS) {
-            dev.cannoli.scorza.util.DebugLog.write("[edit] tick TIMEOUT canonical=$canonical")
+            dev.cannoli.scorza.util.InputLog.write("[edit] tick TIMEOUT canonical=$canonical")
             cancelListening()
             return null
         }
         if (firstEventAtMillis >= 0 && now - firstEventAtMillis >= CAPTURE_WINDOW_MS) {
-            dev.cannoli.scorza.util.DebugLog.write("[edit] tick FINALIZE canonical=$canonical keys=$capturedKeys axes=$capturedAxes")
+            dev.cannoli.scorza.util.InputLog.write("[edit] tick FINALIZE canonical=$canonical keys=$capturedKeys axes=$capturedAxes")
             return finalize(mapping, canonical)
         }
         return null

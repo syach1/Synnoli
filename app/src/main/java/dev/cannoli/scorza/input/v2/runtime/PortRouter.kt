@@ -100,6 +100,10 @@ class PortRouter(private val maxPorts: Int = 4) {
         val previous = target.port
         target.port = toPort
         displaced?.port = previous
+        dev.cannoli.scorza.util.InputLog.write(
+            "reassign id=$deviceId '${target.mapping.displayName}' P${(previous ?: -1) + 1} -> P${toPort + 1}" +
+                (displaced?.let { " (displaced id=${it.device.androidDeviceId} '${it.mapping.displayName}' -> P${(previous ?: -1) + 1})" } ?: "")
+        )
         publish()
     }
 
