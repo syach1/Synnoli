@@ -16,6 +16,9 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
     private val prefs: SharedPreferences =
         context.getSharedPreferences("cannoli_settings", Context.MODE_PRIVATE)
 
+    private val credPrefs: SharedPreferences =
+        context.getSharedPreferences("cannoli_credentials", Context.MODE_PRIVATE)
+
     private var json = JSONObject()
     private val jsonLock = Any()
     private var settingsFile: File? = null
@@ -30,6 +33,26 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
     init {
         loadFromDisk()
         migrateFromPrefs()
+        migrateCredentialsFromJson()
+    }
+
+    private fun migrateCredentialsFromJson() {
+        var changed = false
+        synchronized(jsonLock) {
+            if (json.has(KEY_RA_TOKEN)) {
+                val v = json.optString(KEY_RA_TOKEN, "")
+                if (v.isNotEmpty()) credPrefs.edit().putString(KEY_RA_TOKEN, v).apply()
+                json.remove(KEY_RA_TOKEN)
+                changed = true
+            }
+            if (json.has(KEY_RA_PASSWORD)) {
+                val v = json.optString(KEY_RA_PASSWORD, "")
+                if (v.isNotEmpty()) credPrefs.edit().putString(KEY_RA_PASSWORD, v).apply()
+                json.remove(KEY_RA_PASSWORD)
+                changed = true
+            }
+        }
+        if (changed) saveToDisk()
     }
 
     private fun loadFromDisk() {
@@ -236,12 +259,20 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
         set(value) = jsonWrite { if (value.isEmpty()) remove(KEY_RA_USERNAME) else put(KEY_RA_USERNAME, value) }
 
     var raToken: String
-        get() = jsonRead { optString(KEY_RA_TOKEN, "") }
-        set(value) = jsonWrite { if (value.isEmpty()) remove(KEY_RA_TOKEN) else put(KEY_RA_TOKEN, value) }
+        get() = credPrefs.getString(KEY_RA_TOKEN, "") ?: ""
+        set(value) {
+            val editor = credPrefs.edit()
+            if (value.isEmpty()) editor.remove(KEY_RA_TOKEN) else editor.putString(KEY_RA_TOKEN, value)
+            editor.apply()
+        }
 
     var raPassword: String
-        get() = jsonRead { optString(KEY_RA_PASSWORD, "") }
-        set(value) = jsonWrite { if (value.isEmpty()) remove(KEY_RA_PASSWORD) else put(KEY_RA_PASSWORD, value) }
+        get() = credPrefs.getString(KEY_RA_PASSWORD, "") ?: ""
+        set(value) {
+            val editor = credPrefs.edit()
+            if (value.isEmpty()) editor.remove(KEY_RA_PASSWORD) else editor.putString(KEY_RA_PASSWORD, value)
+            editor.apply()
+        }
 
     var releaseChannel: String
         get() = jsonRead { optString(KEY_RELEASE_CHANNEL, "STABLE") }
