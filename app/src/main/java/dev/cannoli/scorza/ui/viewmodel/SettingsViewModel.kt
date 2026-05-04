@@ -2,6 +2,7 @@ package dev.cannoli.scorza.ui.viewmodel
 
 import android.content.Intent
 import android.content.pm.PackageManager
+import dev.cannoli.scorza.BuildConfig
 import androidx.annotation.StringRes
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -176,11 +177,11 @@ class SettingsViewModel @Inject constructor(
         Category("library", R.string.settings_library),
         Category("input", R.string.settings_input),
         Category("emulation", R.string.settings_emulation),
-        Category("kitchen", R.string.settings_kitchen),
         Category("retroachievements", R.string.settings_retroachievements),
+        Category("kitchen", R.string.settings_kitchen),
         Category("advanced", R.string.settings_advanced),
-        Category("about", R.string.settings_about)
-    )
+        Category("about", R.string.settings_about),
+    ) + if (BuildConfig.DEBUG) listOf(Category("debug", R.string.settings_debug)) else emptyList()
 
     private fun detectInstalledRaPackages(): List<String> {
         val pm = packageManager ?: return listOf(settings.retroArchPackage)
@@ -631,6 +632,12 @@ class SettingsViewModel @Inject constructor(
     private fun showHide(value: Boolean) = if (value) R.string.value_show else R.string.value_hide
     private fun buildItemsForCategory(categoryKey: String): List<SettingsItem> = when (categoryKey) {
         "display" -> buildList {
+            add(SettingsItem("bg_image", R.string.setting_bg_image, valueText = settings.backgroundImagePath?.let { java.io.File(it).name }, valueRes = if (settings.backgroundImagePath == null) R.string.value_none else null))
+            if (settings.backgroundImagePath != null) {
+                val tintVal = settings.backgroundTint
+                add(SettingsItem("bg_tint", R.string.setting_bg_tint, valueText = if (tintVal == 0) null else "$tintVal%", valueRes = if (tintVal == 0) R.string.value_off else null))
+            }
+            add(SettingsItem("colors", R.string.setting_colors, isEditable = true))
             val artScaleRes = when (settings.artScale) {
                 ArtScale.FIT -> R.string.value_fit
                 ArtScale.ORIGINAL -> R.string.value_original
@@ -640,14 +647,11 @@ class SettingsViewModel @Inject constructor(
             add(SettingsItem("art_scale", R.string.setting_art_scale, valueRes = artScaleRes))
             val artW = settings.artWidth
             add(SettingsItem("art_width", R.string.setting_art_width, valueText = if (artW == 0) null else "$artW%", valueRes = if (artW == 0) R.string.value_off else null))
-            add(SettingsItem("bg_image", R.string.setting_bg_image, valueText = settings.backgroundImagePath?.let { java.io.File(it).name }, valueRes = if (settings.backgroundImagePath == null) R.string.value_none else null))
-            if (settings.backgroundImagePath != null) {
-                val tintVal = settings.backgroundTint
-                add(SettingsItem("bg_tint", R.string.setting_bg_tint, valueText = if (tintVal == 0) null else "$tintVal%", valueRes = if (tintVal == 0) R.string.value_off else null))
-            }
-            add(SettingsItem("colors", R.string.setting_colors, isEditable = true))
             val currentFont = fontOptions.firstOrNull { it.key == settings.font } ?: fontOptions.first()
             add(SettingsItem("font", R.string.setting_font, valueText = currentFont.label))
+            add(SettingsItem("text_size", R.string.setting_text_size, valueText = "${settings.textSize.sp}sp"))
+            add(SettingsItem("title", R.string.setting_title, valueText = settings.title.ifEmpty { null }, valueRes = if (settings.title.isEmpty()) R.string.value_none else null, isEditable = true))
+            add(SettingsItem("status_bar", R.string.settings_status_bar, isEditable = true))
             val marginPx = settings.portraitMarginPx
             add(SettingsItem(
                 "portrait_margin",
@@ -655,9 +659,6 @@ class SettingsViewModel @Inject constructor(
                 valueText = if (marginPx == 0) null else "$marginPx px",
                 valueRes = if (marginPx == 0) R.string.value_off else null
             ))
-            add(SettingsItem("status_bar", R.string.settings_status_bar, isEditable = true))
-            add(SettingsItem("text_size", R.string.setting_text_size, valueText = "${settings.textSize.sp}sp"))
-            add(SettingsItem("title", R.string.setting_title, valueText = settings.title.ifEmpty { null }, valueRes = if (settings.title.isEmpty()) R.string.value_none else null, isEditable = true))
         }
         "library" -> buildList {
             val contentModeRes = when (settings.contentMode) {
@@ -729,10 +730,19 @@ class SettingsViewModel @Inject constructor(
             SettingsItem("main_menu_quit", R.string.setting_main_menu_quit, valueRes = onOff(settings.mainMenuQuit)),
             SettingsItem("input_tester", R.string.setting_input_tester, isEditable = true)
         )
-        "emulation" -> listOf(
-            SettingsItem("core_mapping", R.string.setting_core_mapping, isEditable = true),
-            SettingsItem("always_save_on_quit", R.string.setting_always_save_on_quit, valueRes = onOff(settings.alwaysSaveOnQuit))
-        )
+        "emulation" -> buildList {
+            add(SettingsItem("core_mapping", R.string.setting_core_mapping, isEditable = true))
+            val pkgs = detectInstalledRaPackages()
+            if (pkgs.isNotEmpty() && settings.retroArchPackage !in pkgs) {
+                settings.retroArchPackage = pkgs.first()
+            }
+            add(SettingsItem("ra_package", R.string.setting_ra_package, valueText = if (pkgs.isEmpty()) null else settings.retroArchPackage, valueRes = if (pkgs.isEmpty()) R.string.value_none_installed else null, canCycle = pkgs.size > 1))
+            if (pkgs.isNotEmpty()) {
+                val pkgLabel = InstalledCoreService.getPackageLabel(settings.retroArchPackage)
+                add(SettingsItem("installed_cores", R.string.setting_installed_cores, labelText = "$pkgLabel Installed Cores", isEditable = true))
+            }
+            add(SettingsItem("always_save_on_quit", R.string.setting_always_save_on_quit, valueRes = onOff(settings.alwaysSaveOnQuit)))
+        }
         "kitchen" -> emptyList()
         "retroachievements" -> buildList {
             add(SettingsItem("ra_username", R.string.setting_ra_username, valueText = settings.raUsername.ifEmpty { null }, valueRes = if (settings.raUsername.isEmpty()) R.string.value_not_set else null, isEditable = true))
@@ -743,18 +753,8 @@ class SettingsViewModel @Inject constructor(
         }
         "advanced" -> buildList {
             add(SettingsItem("logging", R.string.setting_logging, isEditable = true))
-            add(SettingsItem("audit_emulator_intents", R.string.setting_audit_emulator_intents, isEditable = true))
             add(SettingsItem("retroarch_diy_mode", R.string.setting_retroarch_diy_mode, valueRes = onOff(settings.retroArchDiyMode)))
             add(SettingsItem("kitchen_code_bypass", R.string.setting_kitchen_code_bypass, valueRes = onOff(settings.kitchenCodeBypass)))
-            val pkgs = detectInstalledRaPackages()
-            if (pkgs.isNotEmpty() && settings.retroArchPackage !in pkgs) {
-                settings.retroArchPackage = pkgs.first()
-            }
-            add(SettingsItem("ra_package", R.string.setting_ra_package, valueText = if (pkgs.isEmpty()) null else settings.retroArchPackage, valueRes = if (pkgs.isEmpty()) R.string.value_none_installed else null, canCycle = pkgs.size > 1))
-            if (pkgs.isNotEmpty()) {
-                val pkgLabel = InstalledCoreService.getPackageLabel(settings.retroArchPackage)
-                add(SettingsItem("installed_cores", R.string.setting_installed_cores, labelText = "$pkgLabel Installed Cores", isEditable = true))
-            }
             add(SettingsItem(
                 "release_channel",
                 R.string.settings_release_channel,
@@ -764,6 +764,9 @@ class SettingsViewModel @Inject constructor(
                 add(SettingsItem("set_default_launcher", R.string.setting_set_default_launcher, isEditable = true))
             }
         }
+        "debug" -> listOf(
+            SettingsItem("audit_emulator_intents", R.string.setting_audit_emulator_intents, isEditable = true)
+        )
         else -> emptyList()
     }
 }
