@@ -59,7 +59,7 @@ class ControllerHintTable internal constructor(
             it.vendorId == vendorId && it.productId != null && it.productId == productId
         }
         if (exact != null) {
-            dev.cannoli.scorza.util.DebugLog.write("[hints] vid+pid hit vid=$vendorId pid=$productId -> confirm=${exact.hint.menuConfirm} glyph=${exact.hint.glyphStyle}")
+            dev.cannoli.scorza.util.InputLog.write("[hints] vid+pid hit vid=$vendorId pid=$productId -> confirm=${exact.hint.menuConfirm} glyph=${exact.hint.glyphStyle}")
             return exact.hint
         }
 
@@ -67,7 +67,7 @@ class ControllerHintTable internal constructor(
             it.vendorId == vendorId && it.productId == null
         }
         if (vidOnly != null) {
-            dev.cannoli.scorza.util.DebugLog.write("[hints] vid hit vid=$vendorId -> confirm=${vidOnly.hint.menuConfirm} glyph=${vidOnly.hint.glyphStyle}")
+            dev.cannoli.scorza.util.InputLog.write("[hints] vid hit vid=$vendorId -> confirm=${vidOnly.hint.menuConfirm} glyph=${vidOnly.hint.glyphStyle}")
             return vidOnly.hint
         }
 
@@ -75,11 +75,11 @@ class ControllerHintTable internal constructor(
             buildModel.startsWith(it.modelPrefix, ignoreCase = true)
         }
         if (byModel != null) {
-            dev.cannoli.scorza.util.DebugLog.write("[hints] model prefix '${byModel.modelPrefix}' hit Build.MODEL='$buildModel' -> confirm=${byModel.hint.menuConfirm} glyph=${byModel.hint.glyphStyle}")
+            dev.cannoli.scorza.util.InputLog.write("[hints] model prefix '${byModel.modelPrefix}' hit Build.MODEL='$buildModel' -> confirm=${byModel.hint.menuConfirm} glyph=${byModel.hint.glyphStyle}")
             return byModel.hint
         }
 
-        dev.cannoli.scorza.util.DebugLog.write("[hints] no match for vid=$vendorId pid=$productId Build.MODEL='$buildModel' -> default confirm=${default.menuConfirm} glyph=${default.glyphStyle}")
+        dev.cannoli.scorza.util.InputLog.write("[hints] no match for vid=$vendorId pid=$productId Build.MODEL='$buildModel' -> default confirm=${default.menuConfirm} glyph=${default.glyphStyle}")
         return default
     }
 
