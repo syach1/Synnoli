@@ -25,6 +25,8 @@ enum class ScalingMode(val nativeCode: Int) {
 enum class Sharpness { SHARP, SOFT }
 enum class ScreenEffect { NONE, SHADER }
 
+private const val FPS_EMA_ALPHA = 0.05
+
 class LibretroRenderer(private val runner: LibretroRunner) : GLSurfaceView.Renderer {
 
     @Volatile var paused = false
@@ -62,8 +64,8 @@ class LibretroRenderer(private val runner: LibretroRunner) : GLSurfaceView.Rende
     @Volatile var viewportHeight = 0; private set
     @Volatile var portraitMarginPx: Int = 0
 
-    private var frameCount = 0
-    private var fpsTimestamp = 0L
+    private var lastFpsNanos = 0L
+    private var emaFrameNs = 0.0
     private var lastDrawNanos = 0L
     private var frameAccumulatorNs = 0L
 
@@ -111,7 +113,8 @@ class LibretroRenderer(private val runner: LibretroRunner) : GLSurfaceView.Rende
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) = guard("onSurfaceCreated") {
         GLES20.glClearColor(0f, 0f, 0f, 1f)
-        fpsTimestamp = System.nanoTime()
+        lastFpsNanos = 0L
+        emaFrameNs = 0.0
         loggedFirstFrame = false
         val glVersion = GLES20.glGetString(GLES20.GL_VERSION) ?: ""
         val parsedVersion = parseGlesVersion(glVersion)
@@ -398,15 +401,17 @@ class LibretroRenderer(private val runner: LibretroRunner) : GLSurfaceView.Rende
     }
 
     private fun tickFps() {
-        frameCount++
         val now = System.nanoTime()
-        val elapsed = now - fpsTimestamp
-        if (elapsed >= 1_000_000_000L) {
-            fps = frameCount * 1_000_000_000f / elapsed
-            frameTimeMs = elapsed / (frameCount * 1_000_000f)
-            frameCount = 0
-            fpsTimestamp = now
+        if (lastFpsNanos != 0L) {
+            val delta = (now - lastFpsNanos).toDouble()
+            emaFrameNs = if (emaFrameNs == 0.0) delta
+                         else emaFrameNs * (1.0 - FPS_EMA_ALPHA) + delta * FPS_EMA_ALPHA
+            if (emaFrameNs > 0.0) {
+                fps = (1_000_000_000.0 / emaFrameNs).toFloat()
+                frameTimeMs = (emaFrameNs / 1_000_000.0).toFloat()
+            }
         }
+        lastFpsNanos = now
     }
 
     private fun drawSimple(w: Int, h: Int, vpX: Int, vpY: Int, vpW: Int, vpH: Int) {
