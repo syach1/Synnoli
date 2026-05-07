@@ -138,7 +138,7 @@ fun LibretroScreen(
     val igmScaleFactor = settings.textSize.sp / 22f
     val igmTypography = buildCannoliTypography(baseSizeSp = settings.textSize.sp, fontFamily = LocalCannoliFont.current)
     val labels = ButtonStyle(activeMapping.labelSet(dev.cannoli.ui.ButtonLabelSet.PLUMBER), activeMapping.confirmButton())
-    val statusBarEnabled = (settings.showWifi || settings.showBluetooth || settings.showClock || settings.showBattery || settings.showVpn) && !showDescription && !isGuideScreen
+    val statusBarEnabled = (settings.showWifi || settings.showBluetooth || settings.showClock || settings.batteryDisplay != dev.cannoli.scorza.settings.BatteryDisplay.HIDE || settings.showVpn) && !showDescription && !isGuideScreen
     val statusBarLeftEdge = remember { mutableIntStateOf(Int.MAX_VALUE) }
 
     val portraitMarginState = PortraitMarginState(
@@ -666,7 +666,8 @@ fun LibretroScreen(
                     showBluetooth = settings.showBluetooth,
                     showVpn = settings.showVpn,
                     showClock = settings.showClock,
-                    showBattery = settings.showBattery && !context.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK),
+                    showBattery = settings.batteryDisplay != dev.cannoli.scorza.settings.BatteryDisplay.HIDE && !context.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK),
+                    batteryIconOnly = settings.batteryDisplay == dev.cannoli.scorza.settings.BatteryDisplay.ICON,
                     use24hTime = settings.timeFormat == dev.cannoli.scorza.settings.TimeFormat.TWENTY_FOUR_HOUR
                 )
             }

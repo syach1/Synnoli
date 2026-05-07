@@ -230,6 +230,8 @@
     <string name="value_original">Original</string>
     <string name="value_fit_width">Fit Width</string>
     <string name="value_fit_height">Fit Height</string>
+    <string name="value_percent">Percent</string>
+    <string name="value_icon">Icon</string>
     <string name="value_12h">12h</string>
     <string name="value_24h">24h</string>
     <string name="value_not_set">Not set</string>

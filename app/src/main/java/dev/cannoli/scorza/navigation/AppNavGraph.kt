@@ -870,7 +870,7 @@ fun AppNavGraph(
                 || appSettings.showBluetooth
                 || appSettings.showVpn
                 || appSettings.showClock
-                || appSettings.showBattery
+                || appSettings.batteryDisplay != dev.cannoli.scorza.settings.BatteryDisplay.HIDE
                 || (updateAvailable && appSettings.showUpdate)
         if (!hideForDialog && !hideForScreen && hasContent) {
         Box(
@@ -887,7 +887,8 @@ fun AppNavGraph(
                 showBluetooth = appSettings.showBluetooth,
                 showVpn = appSettings.showVpn,
                 showClock = appSettings.showClock,
-                showBattery = appSettings.showBattery,
+                showBattery = appSettings.batteryDisplay != dev.cannoli.scorza.settings.BatteryDisplay.HIDE,
+                batteryIconOnly = appSettings.batteryDisplay == dev.cannoli.scorza.settings.BatteryDisplay.ICON,
                 showUpdate = appSettings.showUpdate,
                 use24hTime = appSettings.use24h
             )

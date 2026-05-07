@@ -13,6 +13,7 @@ import dev.cannoli.scorza.launcher.InstalledCoreService
 import dev.cannoli.scorza.model.Collection
 import dev.cannoli.scorza.model.CollectionType
 import dev.cannoli.scorza.settings.ArtScale
+import dev.cannoli.scorza.settings.BatteryDisplay
 import dev.cannoli.scorza.settings.ContentMode
 import dev.cannoli.scorza.settings.SettingsRepository
 import dev.cannoli.scorza.settings.TextSize
@@ -126,7 +127,7 @@ class SettingsViewModel @Inject constructor(
         val showBluetooth: Boolean = true,
         val showVpn: Boolean = false,
         val showClock: Boolean = true,
-        val showBattery: Boolean = true,
+        val batteryDisplay: BatteryDisplay = BatteryDisplay.DEFAULT,
         val showUpdate: Boolean = true,
         val swapPlayResume: Boolean = false,
         val mainMenuQuit: Boolean = false,
@@ -160,7 +161,7 @@ class SettingsViewModel @Inject constructor(
         showBluetooth = settings.showBluetooth,
         showVpn = settings.showVpn,
         showClock = settings.showClock,
-        showBattery = settings.showBattery && !isTelevision,
+        batteryDisplay = if (isTelevision) BatteryDisplay.HIDE else settings.batteryDisplay,
         showUpdate = settings.showUpdate,
         swapPlayResume = settings.swapPlayResume,
         mainMenuQuit = settings.mainMenuQuit,
@@ -208,7 +209,7 @@ class SettingsViewModel @Inject constructor(
         val showBluetooth: Boolean,
         val showVpn: Boolean,
         val showClock: Boolean,
-        val showBattery: Boolean,
+        val batteryDisplay: BatteryDisplay,
         val showRecentlyPlayed: Boolean,
         val contentMode: ContentMode,
         val fghCollectionStem: String?,
@@ -420,7 +421,11 @@ class SettingsViewModel @Inject constructor(
             "show_wifi" -> settings.showWifi = !settings.showWifi
             "show_bluetooth" -> settings.showBluetooth = !settings.showBluetooth
             "show_vpn" -> settings.showVpn = !settings.showVpn
-            "show_battery" -> settings.showBattery = !settings.showBattery
+            "show_battery" -> {
+                val entries = BatteryDisplay.entries
+                val cur = entries.indexOf(settings.batteryDisplay).coerceAtLeast(0)
+                settings.batteryDisplay = entries[((cur + direction) % entries.size + entries.size) % entries.size]
+            }
             "show_update" -> settings.showUpdate = !settings.showUpdate
             "main_menu_quit" -> settings.mainMenuQuit = !settings.mainMenuQuit
             "retroarch_diy_mode" -> settings.retroArchDiyMode = !settings.retroArchDiyMode
@@ -573,7 +578,7 @@ class SettingsViewModel @Inject constructor(
         showBluetooth = settings.showBluetooth,
         showVpn = settings.showVpn,
         showClock = settings.showClock,
-        showBattery = settings.showBattery,
+        batteryDisplay = settings.batteryDisplay,
         showRecentlyPlayed = settings.showRecentlyPlayed,
         contentMode = settings.contentMode,
         fghCollectionStem = settings.fghCollectionStem,
@@ -607,7 +612,7 @@ class SettingsViewModel @Inject constructor(
         settings.showBluetooth = snap.showBluetooth
         settings.showVpn = snap.showVpn
         settings.showClock = snap.showClock
-        settings.showBattery = snap.showBattery
+        settings.batteryDisplay = snap.batteryDisplay
         settings.showRecentlyPlayed = snap.showRecentlyPlayed
         settings.contentMode = snap.contentMode
         settings.fghCollectionStem = snap.fghCollectionStem
@@ -715,7 +720,14 @@ class SettingsViewModel @Inject constructor(
             SettingsItem("color_accent", R.string.setting_color_accent, valueText = settings.colorAccent.uppercase(), isEditable = true, swatchColor = hexToColor(settings.colorAccent))
         )
         "status_bar" -> buildList {
-            if (!isTelevision) add(SettingsItem("show_battery", R.string.setting_battery, valueRes = showHide(settings.showBattery)))
+            if (!isTelevision) {
+                val batteryRes = when (settings.batteryDisplay) {
+                    BatteryDisplay.HIDE -> R.string.value_hide
+                    BatteryDisplay.PERCENT -> R.string.value_percent
+                    BatteryDisplay.ICON -> R.string.value_icon
+                }
+                add(SettingsItem("show_battery", R.string.setting_battery, valueRes = batteryRes))
+            }
             add(SettingsItem("show_bluetooth", R.string.setting_bluetooth, valueRes = showHide(settings.showBluetooth)))
             add(SettingsItem("show_clock", R.string.setting_clock, valueRes = if (!settings.showClock) R.string.value_hide else if (settings.timeFormat == TimeFormat.TWELVE_HOUR) R.string.value_12h else R.string.value_24h))
             add(SettingsItem("show_update", R.string.setting_updater, valueRes = showHide(settings.showUpdate)))

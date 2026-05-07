@@ -185,9 +185,9 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
         get() = jsonRead { optBoolean(KEY_SHOW_CLOCK, true) }
         set(value) = jsonWrite { put(KEY_SHOW_CLOCK, value) }
 
-    var showBattery: Boolean
-        get() = jsonRead { optBoolean(KEY_SHOW_BATTERY, true) }
-        set(value) = jsonWrite { put(KEY_SHOW_BATTERY, value) }
+    var batteryDisplay: BatteryDisplay
+        get() = BatteryDisplay.fromString(jsonRead { if (has(KEY_BATTERY_DISPLAY)) optString(KEY_BATTERY_DISPLAY) else null })
+        set(value) = jsonWrite { put(KEY_BATTERY_DISPLAY, value.name) }
 
     var showUpdate: Boolean
         get() = jsonRead { optBoolean(KEY_SHOW_UPDATE, true) }
@@ -351,7 +351,7 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
         private const val KEY_SHOW_BLUETOOTH = "show_bluetooth"
         private const val KEY_SHOW_VPN = "show_vpn"
         private const val KEY_SHOW_CLOCK = "show_clock"
-        private const val KEY_SHOW_BATTERY = "show_battery"
+        private const val KEY_BATTERY_DISPLAY = "battery_display"
         private const val KEY_SHOW_UPDATE = "show_update"
         private const val KEY_SHOW_TOOLS = "show_tools"
         private const val KEY_SHOW_PORTS = "show_ports"
@@ -403,6 +403,16 @@ enum class ArtScale {
     companion object {
         val DEFAULT = FIT
         fun fromString(value: String?): ArtScale =
+            entries.firstOrNull { it.name == value } ?: DEFAULT
+    }
+}
+
+
+enum class BatteryDisplay {
+    HIDE, PERCENT, ICON;
+    companion object {
+        val DEFAULT = PERCENT
+        fun fromString(value: String?): BatteryDisplay =
             entries.firstOrNull { it.name == value } ?: DEFAULT
     }
 }
