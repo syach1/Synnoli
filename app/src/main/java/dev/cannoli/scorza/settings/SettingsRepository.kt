@@ -4,15 +4,20 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.os.Handler
 import android.os.HandlerThread
-import dev.cannoli.ui.ButtonLabelSet
-import dev.cannoli.ui.ConfirmButton
+import dagger.hilt.android.qualifiers.ApplicationContext
 import org.json.JSONObject
 import java.io.File
+import javax.inject.Inject
+import javax.inject.Singleton
 
-class SettingsRepository(context: Context) {
+@Singleton
+class SettingsRepository @Inject constructor(@ApplicationContext context: Context) {
 
     private val prefs: SharedPreferences =
         context.getSharedPreferences("cannoli_settings", Context.MODE_PRIVATE)
+
+    private val credPrefs: SharedPreferences =
+        context.getSharedPreferences("cannoli_credentials", Context.MODE_PRIVATE)
 
     private var json = JSONObject()
     private val jsonLock = Any()
@@ -28,10 +33,30 @@ class SettingsRepository(context: Context) {
     init {
         loadFromDisk()
         migrateFromPrefs()
+        migrateCredentialsFromJson()
+    }
+
+    private fun migrateCredentialsFromJson() {
+        var changed = false
+        synchronized(jsonLock) {
+            if (json.has(KEY_RA_TOKEN)) {
+                val v = json.optString(KEY_RA_TOKEN, "")
+                if (v.isNotEmpty()) credPrefs.edit().putString(KEY_RA_TOKEN, v).apply()
+                json.remove(KEY_RA_TOKEN)
+                changed = true
+            }
+            if (json.has(KEY_RA_PASSWORD)) {
+                val v = json.optString(KEY_RA_PASSWORD, "")
+                if (v.isNotEmpty()) credPrefs.edit().putString(KEY_RA_PASSWORD, v).apply()
+                json.remove(KEY_RA_PASSWORD)
+                changed = true
+            }
+        }
+        if (changed) saveToDisk()
     }
 
     private fun loadFromDisk() {
-        val file = File(sdCardRoot, "Config/settings.json")
+        val file = dev.cannoli.scorza.config.CannoliPaths(sdCardRoot).settingsJson
         settingsFile = file
         if (file.exists()) {
             try { synchronized(jsonLock) { json = JSONObject(file.readText()) } } catch (_: java.io.IOException) {} catch (_: org.json.JSONException) {}
@@ -92,7 +117,7 @@ class SettingsRepository(context: Context) {
         get() = prefs.getString(KEY_SD_ROOT, DEFAULT_ROOT) ?: DEFAULT_ROOT
         set(value) {
             prefs.edit().putString(KEY_SD_ROOT, value).apply()
-            settingsFile = File(value, "Config/settings.json")
+            settingsFile = dev.cannoli.scorza.config.CannoliPaths(value).settingsJson
             loadFromDisk()
         }
 
@@ -132,14 +157,6 @@ class SettingsRepository(context: Context) {
         get() = jsonRead { optBoolean(KEY_SWAP_PLAY_RESUME, false) }
         set(value) = jsonWrite { put(KEY_SWAP_PLAY_RESUME, value) }
 
-    var buttonLabelSet: ButtonLabelSet
-        get() = ButtonLabelSet.fromString(jsonRead { if (has(KEY_BUTTON_LABEL_SET)) optString(KEY_BUTTON_LABEL_SET) else null })
-        set(value) = jsonWrite { put(KEY_BUTTON_LABEL_SET, value.name) }
-
-    var confirmButton: ConfirmButton
-        get() = ConfirmButton.fromString(jsonRead { if (has(KEY_CONFIRM_BUTTON)) optString(KEY_CONFIRM_BUTTON) else null })
-        set(value) = jsonWrite { put(KEY_CONFIRM_BUTTON, value.name) }
-
     var mainMenuQuit: Boolean
         get() = jsonRead { optBoolean(KEY_MAIN_MENU_QUIT, false) }
         set(value) = jsonWrite { put(KEY_MAIN_MENU_QUIT, value) }
@@ -168,17 +185,14 @@ class SettingsRepository(context: Context) {
         get() = jsonRead { optBoolean(KEY_SHOW_CLOCK, true) }
         set(value) = jsonWrite { put(KEY_SHOW_CLOCK, value) }
 
-    var showBattery: Boolean
-        get() = jsonRead { optBoolean(KEY_SHOW_BATTERY, true) }
-        set(value) = jsonWrite { put(KEY_SHOW_BATTERY, value) }
+    var batteryDisplay: BatteryDisplay
+        get() = BatteryDisplay.fromString(jsonRead { if (has(KEY_BATTERY_DISPLAY)) optString(KEY_BATTERY_DISPLAY) else null })
+        set(value) = jsonWrite { put(KEY_BATTERY_DISPLAY, value.name) }
 
     var showUpdate: Boolean
         get() = jsonRead { optBoolean(KEY_SHOW_UPDATE, true) }
         set(value) = jsonWrite { put(KEY_SHOW_UPDATE, value) }
 
-    var showEmpty: Boolean
-        get() = jsonRead { optBoolean(KEY_SHOW_EMPTY, false) }
-        set(value) = jsonWrite { put(KEY_SHOW_EMPTY, value) }
 
     var showTools: Boolean
         get() = jsonRead { optBoolean(KEY_SHOW_TOOLS, false) }
@@ -240,17 +254,33 @@ class SettingsRepository(context: Context) {
         get() = jsonRead { optString(KEY_COLOR_TITLE, "#FFFFFF") }
         set(value) = jsonWrite { put(KEY_COLOR_TITLE, value) }
 
+    var colorBackground: String
+        get() = jsonRead { optString(KEY_COLOR_BACKGROUND, "#000000") }
+        set(value) = jsonWrite { put(KEY_COLOR_BACKGROUND, value) }
+
+    var colorStatusBar: String
+        get() = jsonRead { optString(KEY_COLOR_STATUS_BAR, "#FFFFFF") }
+        set(value) = jsonWrite { put(KEY_COLOR_STATUS_BAR, value) }
+
     var raUsername: String
         get() = jsonRead { optString(KEY_RA_USERNAME, "") }
         set(value) = jsonWrite { if (value.isEmpty()) remove(KEY_RA_USERNAME) else put(KEY_RA_USERNAME, value) }
 
     var raToken: String
-        get() = jsonRead { optString(KEY_RA_TOKEN, "") }
-        set(value) = jsonWrite { if (value.isEmpty()) remove(KEY_RA_TOKEN) else put(KEY_RA_TOKEN, value) }
+        get() = credPrefs.getString(KEY_RA_TOKEN, "") ?: ""
+        set(value) {
+            val editor = credPrefs.edit()
+            if (value.isEmpty()) editor.remove(KEY_RA_TOKEN) else editor.putString(KEY_RA_TOKEN, value)
+            editor.apply()
+        }
 
     var raPassword: String
-        get() = jsonRead { optString(KEY_RA_PASSWORD, "") }
-        set(value) = jsonWrite { if (value.isEmpty()) remove(KEY_RA_PASSWORD) else put(KEY_RA_PASSWORD, value) }
+        get() = credPrefs.getString(KEY_RA_PASSWORD, "") ?: ""
+        set(value) {
+            val editor = credPrefs.edit()
+            if (value.isEmpty()) editor.remove(KEY_RA_PASSWORD) else editor.putString(KEY_RA_PASSWORD, value)
+            editor.apply()
+        }
 
     var releaseChannel: String
         get() = jsonRead { optString(KEY_RELEASE_CHANNEL, "STABLE") }
@@ -280,9 +310,17 @@ class SettingsRepository(context: Context) {
         get() = jsonRead { optString(KEY_CACHED_UPDATE_CHANGELOG, "") }
         set(value) = jsonWrite { if (value.isEmpty()) remove(KEY_CACHED_UPDATE_CHANGELOG) else put(KEY_CACHED_UPDATE_CHANGELOG, value) }
 
-    var debugLogging: Boolean
-        get() = jsonRead { optBoolean(KEY_DEBUG_LOGGING, false) }
-        set(value) = jsonWrite { put(KEY_DEBUG_LOGGING, value) }
+    var loggingRomScan: Boolean
+        get() = jsonRead { optBoolean(KEY_LOGGING_ROM_SCAN, false) }
+        set(value) = jsonWrite { put(KEY_LOGGING_ROM_SCAN, value) }
+
+    var loggingInput: Boolean
+        get() = jsonRead { optBoolean(KEY_LOGGING_INPUT, false) }
+        set(value) = jsonWrite { put(KEY_LOGGING_INPUT, value) }
+
+    var loggingSession: Boolean
+        get() = jsonRead { optBoolean(KEY_LOGGING_SESSION, false) }
+        set(value) = jsonWrite { put(KEY_LOGGING_SESSION, value) }
 
     var alwaysSaveOnQuit: Boolean
         get() = jsonRead { optBoolean(KEY_ALWAYS_SAVE_ON_QUIT, false) }
@@ -312,17 +350,18 @@ class SettingsRepository(context: Context) {
         private const val KEY_COLOR_HIGHLIGHT_TEXT = "color_highlight_text"
         private const val KEY_COLOR_ACCENT = "color_accent"
         private const val KEY_COLOR_TITLE = "color_title"
+        private const val KEY_COLOR_BACKGROUND = "color_background"
+        private const val KEY_COLOR_STATUS_BAR = "color_status_bar"
         private const val KEY_PLATFORM_SWITCHING = "platform_switching"
         private const val KEY_SWAP_PLAY_RESUME = "swap_play_resume"
         private const val KEY_MAIN_MENU_QUIT = "main_menu_quit"
         private const val KEY_KITCHEN_CODE_BYPASS = "kitchen_code_bypass"
         private const val KEY_RETROARCH_DIY_MODE = "retroarch_diy_mode"
-        private const val KEY_SHOW_EMPTY = "show_empty"
         private const val KEY_SHOW_WIFI = "show_wifi"
         private const val KEY_SHOW_BLUETOOTH = "show_bluetooth"
         private const val KEY_SHOW_VPN = "show_vpn"
         private const val KEY_SHOW_CLOCK = "show_clock"
-        private const val KEY_SHOW_BATTERY = "show_battery"
+        private const val KEY_BATTERY_DISPLAY = "battery_display"
         private const val KEY_SHOW_UPDATE = "show_update"
         private const val KEY_SHOW_TOOLS = "show_tools"
         private const val KEY_SHOW_PORTS = "show_ports"
@@ -339,10 +378,10 @@ class SettingsRepository(context: Context) {
         private const val KEY_CACHED_UPDATE_TAG = "cached_update_tag"
         private const val KEY_CACHED_UPDATE_APK = "cached_update_apk"
         private const val KEY_CACHED_UPDATE_CHANGELOG = "cached_update_changelog"
-        private const val KEY_BUTTON_LABEL_SET = "button_label_set"
-        private const val KEY_CONFIRM_BUTTON = "confirm_button"
         private const val KEY_CONTENT_MODE = "content_mode"
-        private const val KEY_DEBUG_LOGGING = "debug_logging"
+        private const val KEY_LOGGING_ROM_SCAN = "logging_rom_scan"
+        private const val KEY_LOGGING_INPUT = "logging_input"
+        private const val KEY_LOGGING_SESSION = "logging_session"
         private const val KEY_ALWAYS_SAVE_ON_QUIT = "always_save_on_quit"
         private const val KEY_PORTRAIT_MARGIN_PX = "portrait_margin_px"
         private const val KEY_FGH_COLLECTION = "fgh_collection"
@@ -374,6 +413,16 @@ enum class ArtScale {
     companion object {
         val DEFAULT = FIT
         fun fromString(value: String?): ArtScale =
+            entries.firstOrNull { it.name == value } ?: DEFAULT
+    }
+}
+
+
+enum class BatteryDisplay {
+    HIDE, PERCENT, ICON;
+    companion object {
+        val DEFAULT = PERCENT
+        fun fromString(value: String?): BatteryDisplay =
             entries.firstOrNull { it.name == value } ?: DEFAULT
     }
 }

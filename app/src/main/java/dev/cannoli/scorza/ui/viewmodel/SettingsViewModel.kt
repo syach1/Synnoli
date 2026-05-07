@@ -2,37 +2,41 @@ package dev.cannoli.scorza.ui.viewmodel
 
 import android.content.Intent
 import android.content.pm.PackageManager
+import dev.cannoli.scorza.BuildConfig
 import androidx.annotation.StringRes
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
+import dagger.hilt.android.scopes.ActivityScoped
 import dev.cannoli.scorza.R
+import dev.cannoli.scorza.db.CollectionsRepository
 import dev.cannoli.scorza.launcher.InstalledCoreService
 import dev.cannoli.scorza.model.Collection
-import dev.cannoli.scorza.scanner.CollectionManager
+import dev.cannoli.scorza.model.CollectionType
 import dev.cannoli.scorza.settings.ArtScale
+import dev.cannoli.scorza.settings.BatteryDisplay
 import dev.cannoli.scorza.settings.ContentMode
 import dev.cannoli.scorza.settings.SettingsRepository
 import dev.cannoli.scorza.settings.TextSize
 import dev.cannoli.scorza.settings.TimeFormat
 import dev.cannoli.scorza.util.FontNameParser
 import dev.cannoli.scorza.util.sortedNatural
+import dev.cannoli.scorza.di.AppFonts
 import dev.cannoli.ui.BULLET
-import dev.cannoli.ui.ButtonLabelSet
-import dev.cannoli.ui.ConfirmButton
-import dev.cannoli.ui.theme.BPReplay
-import dev.cannoli.ui.theme.MPlus1Code
 import dev.cannoli.ui.theme.hexToColor
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import javax.inject.Inject
 
-class SettingsViewModel(
+@ActivityScoped
+class SettingsViewModel @Inject constructor(
     private val settings: SettingsRepository,
-    private var cannoliRoot: java.io.File? = null,
-    private var packageManager: PackageManager? = null,
-    private var appPackageName: String? = null,
-    private var collectionManager: CollectionManager? = null
+    private val appFonts: AppFonts,
 ) {
+    private var cannoliRoot: java.io.File? = null
+    private var packageManager: PackageManager? = null
+    private var appPackageName: String? = null
+    private var collectionsRepository: CollectionsRepository? = null
 
     val isTelevision: Boolean
         get() = packageManager?.hasSystemFeature(PackageManager.FEATURE_LEANBACK) == true
@@ -49,8 +53,8 @@ class SettingsViewModel(
     private var fontOptions: List<FontOption> = buildFontOptions()
 
     private fun buildFontOptions(): List<FontOption> = buildList {
-        add(FontOption("default", "Default", MPlus1Code))
-        add(FontOption("the_og", "The OG", BPReplay))
+        add(FontOption("default", "Default", appFonts.mplus1Code))
+        add(FontOption("the_og", "The OG", appFonts.bpReplay))
         val fontsDir = cannoliRoot?.let { java.io.File(it, "Config/Fonts") }
         val exts = setOf("ttf", "otf")
         val customFiles = fontsDir?.listFiles()
@@ -66,7 +70,7 @@ class SettingsViewModel(
 
     private fun resolveFont(): FontFamily {
         val key = settings.font
-        return fontOptions.firstOrNull { it.key == key }?.fontFamily ?: MPlus1Code
+        return fontOptions.firstOrNull { it.key == key }?.fontFamily ?: appFonts.mplus1Code
     }
 
     data class SettingsItem(
@@ -112,26 +116,26 @@ class SettingsViewModel(
         val backgroundTint: Int = 0,
         val textSize: TextSize = TextSize.DEFAULT,
 
-        val fontFamily: FontFamily = MPlus1Code,
+        val fontFamily: FontFamily = FontFamily.Default,
         val title: String = "",
         val colorHighlight: Color = Color.White,
         val colorText: Color = Color.White,
         val colorHighlightText: Color = Color.Black,
         val colorAccent: Color = Color.White,
         val colorTitle: Color = Color.White,
+        val colorBackground: Color = Color.Black,
+        val colorStatusBar: Color = Color.White,
         val showWifi: Boolean = true,
         val showBluetooth: Boolean = true,
         val showVpn: Boolean = false,
         val showClock: Boolean = true,
-        val showBattery: Boolean = true,
+        val batteryDisplay: BatteryDisplay = BatteryDisplay.DEFAULT,
         val showUpdate: Boolean = true,
         val swapPlayResume: Boolean = false,
         val mainMenuQuit: Boolean = false,
         val retroArchDiyMode: Boolean = true,
         val artWidth: Int = 40,
         val artScale: ArtScale = ArtScale.DEFAULT,
-        val buttonLabelSet: ButtonLabelSet = ButtonLabelSet.PLUMBER,
-        val confirmButton: ConfirmButton = ConfirmButton.EAST,
         val contentMode: ContentMode = ContentMode.PLATFORMS,
         val fghCollectionStem: String? = null,
         val portraitMarginPx: Int = 0,
@@ -155,19 +159,19 @@ class SettingsViewModel(
         colorHighlightText = hexToColor(settings.colorHighlightText) ?: Color.Black,
         colorAccent = hexToColor(settings.colorAccent) ?: Color.White,
         colorTitle = hexToColor(settings.colorTitle) ?: Color.White,
+        colorBackground = hexToColor(settings.colorBackground) ?: Color.Black,
+        colorStatusBar = hexToColor(settings.colorStatusBar) ?: Color.White,
         showWifi = settings.showWifi,
         showBluetooth = settings.showBluetooth,
         showVpn = settings.showVpn,
         showClock = settings.showClock,
-        showBattery = settings.showBattery && !isTelevision,
+        batteryDisplay = if (isTelevision) BatteryDisplay.HIDE else settings.batteryDisplay,
         showUpdate = settings.showUpdate,
         swapPlayResume = settings.swapPlayResume,
         mainMenuQuit = settings.mainMenuQuit,
         retroArchDiyMode = settings.retroArchDiyMode,
         artWidth = settings.artWidth,
         artScale = settings.artScale,
-        buttonLabelSet = settings.buttonLabelSet,
-        confirmButton = settings.confirmButton,
         contentMode = settings.contentMode,
         fghCollectionStem = settings.fghCollectionStem,
         portraitMarginPx = settings.portraitMarginPx,
@@ -178,11 +182,11 @@ class SettingsViewModel(
         Category("library", R.string.settings_library),
         Category("input", R.string.settings_input),
         Category("emulation", R.string.settings_emulation),
-        Category("kitchen", R.string.settings_kitchen),
         Category("retroachievements", R.string.settings_retroachievements),
+        Category("kitchen", R.string.settings_kitchen),
         Category("advanced", R.string.settings_advanced),
-        Category("about", R.string.settings_about)
-    )
+        Category("about", R.string.settings_about),
+    ) + if (BuildConfig.DEBUG) listOf(Category("debug", R.string.settings_debug)) else emptyList()
 
     private fun detectInstalledRaPackages(): List<String> {
         val pm = packageManager ?: return listOf(settings.retroArchPackage)
@@ -203,14 +207,15 @@ class SettingsViewModel(
         val colorHighlightText: String,
         val colorAccent: String,
         val colorTitle: String,
+        val colorBackground: String,
+        val colorStatusBar: String,
         val platformSwitching: Boolean,
         val swapPlayResume: Boolean,
         val showWifi: Boolean,
         val showBluetooth: Boolean,
         val showVpn: Boolean,
         val showClock: Boolean,
-        val showBattery: Boolean,
-        val showEmpty: Boolean,
+        val batteryDisplay: BatteryDisplay,
         val showRecentlyPlayed: Boolean,
         val contentMode: ContentMode,
         val fghCollectionStem: String?,
@@ -229,16 +234,27 @@ class SettingsViewModel(
     private var snapshot: SettingsSnapshot? = null
 
     fun load() {
+        val current = _state.value
+        if (current.inSubList) {
+            // Lock/unlock or any onResume mid-settings: refresh values without wiping nav
+            // state. Keep the existing cancel snapshot so revert still points at pre-edit
+            // values rather than the just-resumed state.
+            val cat = current.activeCategory ?: return
+            val items = buildItemsForCategory(cat)
+            _state.update { it.copy(categories = buildCategoryList(), items = items) }
+            _appSettings.value = readAppSettings()
+            return
+        }
         snapshot = captureSettings()
         _state.value = State(categories = buildCategoryList(), categoryIndex = 0)
         _appSettings.value = readAppSettings()
     }
 
-    fun reinitialize(root: java.io.File, pm: PackageManager, pkgName: String, cm: CollectionManager? = null) {
+    fun reinitialize(root: java.io.File, pm: PackageManager, pkgName: String, cr: CollectionsRepository? = null) {
         cannoliRoot = root
         packageManager = pm
         appPackageName = pkgName
-        if (cm != null) collectionManager = cm
+        if (cr != null) collectionsRepository = cr
         fontOptions = buildFontOptions()
         load()
     }
@@ -356,16 +372,6 @@ class SettingsViewModel(
                 val cur = entries.indexOf(settings.textSize).coerceAtLeast(0)
                 settings.textSize = entries[((cur + direction) % entries.size + entries.size) % entries.size]
             }
-            "button_labels" -> {
-                val entries = ButtonLabelSet.entries
-                val cur = entries.indexOf(settings.buttonLabelSet).coerceAtLeast(0)
-                settings.buttonLabelSet = entries[((cur + direction) % entries.size + entries.size) % entries.size]
-            }
-            "confirm_button" -> {
-                val entries = ConfirmButton.entries
-                val cur = entries.indexOf(settings.confirmButton).coerceAtLeast(0)
-                settings.confirmButton = entries[((cur + direction) % entries.size + entries.size) % entries.size]
-            }
             "font" -> {
                 val cur = fontOptions.indexOfFirst { it.key == settings.font }.coerceAtLeast(0)
                 settings.font = fontOptions[((cur + direction) % fontOptions.size + fontOptions.size) % fontOptions.size].key
@@ -417,16 +423,18 @@ class SettingsViewModel(
                     settings.fghCollectionStem = stems[next]
                 }
             }
-            "show_empty" -> settings.showEmpty = !settings.showEmpty
             "show_recently_played" -> settings.showRecentlyPlayed = !settings.showRecentlyPlayed
             "show_wifi" -> settings.showWifi = !settings.showWifi
             "show_bluetooth" -> settings.showBluetooth = !settings.showBluetooth
             "show_vpn" -> settings.showVpn = !settings.showVpn
-            "show_battery" -> settings.showBattery = !settings.showBattery
+            "show_battery" -> {
+                val entries = BatteryDisplay.entries
+                val cur = entries.indexOf(settings.batteryDisplay).coerceAtLeast(0)
+                settings.batteryDisplay = entries[((cur + direction) % entries.size + entries.size) % entries.size]
+            }
             "show_update" -> settings.showUpdate = !settings.showUpdate
             "main_menu_quit" -> settings.mainMenuQuit = !settings.mainMenuQuit
             "retroarch_diy_mode" -> settings.retroArchDiyMode = !settings.retroArchDiyMode
-            "debug_logging" -> settings.debugLogging = !settings.debugLogging
             "always_save_on_quit" -> settings.alwaysSaveOnQuit = !settings.alwaysSaveOnQuit
             "portrait_margin" -> {
                 val step = when {
@@ -519,8 +527,10 @@ class SettingsViewModel(
     fun getColorEntries(): List<dev.cannoli.scorza.ui.screens.ColorEntry> {
         val names = mapOf(
             "color_accent" to R.string.setting_color_accent,
+            "color_background" to R.string.setting_color_background,
             "color_highlight" to R.string.setting_color_highlight,
             "color_highlight_text" to R.string.setting_color_highlight_text,
+            "color_status_bar" to R.string.setting_color_status_bar,
             "color_text" to R.string.setting_color_text,
             "color_title" to R.string.setting_color_title
         )
@@ -542,6 +552,8 @@ class SettingsViewModel(
         "color_highlight_text" -> settings.colorHighlightText
         "color_accent" -> settings.colorAccent
         "color_title" -> settings.colorTitle
+        "color_background" -> settings.colorBackground
+        "color_status_bar" -> settings.colorStatusBar
         else -> "#FFFFFF"
     }
 
@@ -552,6 +564,8 @@ class SettingsViewModel(
             "color_highlight_text" -> settings.colorHighlightText = hex
             "color_accent" -> settings.colorAccent = hex
             "color_title" -> settings.colorTitle = hex
+            "color_background" -> settings.colorBackground = hex
+            "color_status_bar" -> settings.colorStatusBar = hex
         }
         val catKey = _state.value.activeCategory ?: return
         _state.update { it.copy(items = buildItemsForCategory(catKey)) }
@@ -570,14 +584,15 @@ class SettingsViewModel(
         colorHighlightText = settings.colorHighlightText,
         colorAccent = settings.colorAccent,
         colorTitle = settings.colorTitle,
+        colorBackground = settings.colorBackground,
+        colorStatusBar = settings.colorStatusBar,
         platformSwitching = settings.platformSwitching,
         swapPlayResume = settings.swapPlayResume,
         showWifi = settings.showWifi,
         showBluetooth = settings.showBluetooth,
         showVpn = settings.showVpn,
         showClock = settings.showClock,
-        showBattery = settings.showBattery,
-        showEmpty = settings.showEmpty,
+        batteryDisplay = settings.batteryDisplay,
         showRecentlyPlayed = settings.showRecentlyPlayed,
         contentMode = settings.contentMode,
         fghCollectionStem = settings.fghCollectionStem,
@@ -605,14 +620,15 @@ class SettingsViewModel(
         settings.colorHighlightText = snap.colorHighlightText
         settings.colorAccent = snap.colorAccent
         settings.colorTitle = snap.colorTitle
+        settings.colorBackground = snap.colorBackground
+        settings.colorStatusBar = snap.colorStatusBar
         settings.platformSwitching = snap.platformSwitching
         settings.swapPlayResume = snap.swapPlayResume
         settings.showWifi = snap.showWifi
         settings.showBluetooth = snap.showBluetooth
         settings.showVpn = snap.showVpn
         settings.showClock = snap.showClock
-        settings.showBattery = snap.showBattery
-        settings.showEmpty = snap.showEmpty
+        settings.batteryDisplay = snap.batteryDisplay
         settings.showRecentlyPlayed = snap.showRecentlyPlayed
         settings.contentMode = snap.contentMode
         settings.fghCollectionStem = snap.fghCollectionStem
@@ -629,14 +645,20 @@ class SettingsViewModel(
     }
 
     private fun fghCollectionStems(): List<String> {
-        val cm = collectionManager ?: return emptyList()
-        return cm.getCollectionStems().filter { !it.equals("Favorites", ignoreCase = true) }
+        val cr = collectionsRepository ?: return emptyList()
+        return cr.all().filter { it.type == CollectionType.STANDARD }.map { it.displayName }
     }
 
     private fun onOff(value: Boolean) = if (value) R.string.value_on else R.string.value_off
     private fun showHide(value: Boolean) = if (value) R.string.value_show else R.string.value_hide
     private fun buildItemsForCategory(categoryKey: String): List<SettingsItem> = when (categoryKey) {
         "display" -> buildList {
+            add(SettingsItem("bg_image", R.string.setting_bg_image, valueText = settings.backgroundImagePath?.let { java.io.File(it).name }, valueRes = if (settings.backgroundImagePath == null) R.string.value_none else null))
+            if (settings.backgroundImagePath != null) {
+                val tintVal = settings.backgroundTint
+                add(SettingsItem("bg_tint", R.string.setting_bg_tint, valueText = if (tintVal == 0) null else "$tintVal%", valueRes = if (tintVal == 0) R.string.value_off else null))
+            }
+            add(SettingsItem("colors", R.string.setting_colors, isEditable = true))
             val artScaleRes = when (settings.artScale) {
                 ArtScale.FIT -> R.string.value_fit
                 ArtScale.ORIGINAL -> R.string.value_original
@@ -646,14 +668,11 @@ class SettingsViewModel(
             add(SettingsItem("art_scale", R.string.setting_art_scale, valueRes = artScaleRes))
             val artW = settings.artWidth
             add(SettingsItem("art_width", R.string.setting_art_width, valueText = if (artW == 0) null else "$artW%", valueRes = if (artW == 0) R.string.value_off else null))
-            add(SettingsItem("bg_image", R.string.setting_bg_image, valueText = settings.backgroundImagePath?.let { java.io.File(it).name }, valueRes = if (settings.backgroundImagePath == null) R.string.value_none else null))
-            if (settings.backgroundImagePath != null) {
-                val tintVal = settings.backgroundTint
-                add(SettingsItem("bg_tint", R.string.setting_bg_tint, valueText = if (tintVal == 0) null else "$tintVal%", valueRes = if (tintVal == 0) R.string.value_off else null))
-            }
-            add(SettingsItem("colors", R.string.setting_colors, isEditable = true))
             val currentFont = fontOptions.firstOrNull { it.key == settings.font } ?: fontOptions.first()
             add(SettingsItem("font", R.string.setting_font, valueText = currentFont.label))
+            add(SettingsItem("text_size", R.string.setting_text_size, valueText = "${settings.textSize.sp}sp"))
+            add(SettingsItem("title", R.string.setting_title, valueText = settings.title.ifEmpty { null }, valueRes = if (settings.title.isEmpty()) R.string.value_none else null, isEditable = true))
+            add(SettingsItem("status_bar", R.string.settings_status_bar, isEditable = true))
             val marginPx = settings.portraitMarginPx
             add(SettingsItem(
                 "portrait_margin",
@@ -661,9 +680,6 @@ class SettingsViewModel(
                 valueText = if (marginPx == 0) null else "$marginPx px",
                 valueRes = if (marginPx == 0) R.string.value_off else null
             ))
-            add(SettingsItem("status_bar", R.string.settings_status_bar, isEditable = true))
-            add(SettingsItem("text_size", R.string.setting_text_size, valueText = "${settings.textSize.sp}sp"))
-            add(SettingsItem("title", R.string.setting_title, valueText = settings.title.ifEmpty { null }, valueRes = if (settings.title.isEmpty()) R.string.value_none else null, isEditable = true))
         }
         "library" -> buildList {
             val contentModeRes = when (settings.contentMode) {
@@ -692,7 +708,6 @@ class SettingsViewModel(
                 add(SettingsItem("show_recently_played", R.string.setting_show_recently_played, valueRes = showHide(settings.showRecentlyPlayed)))
             }
             if (settings.contentMode == ContentMode.PLATFORMS) {
-                add(SettingsItem("show_empty", R.string.setting_show_empty, valueRes = showHide(settings.showEmpty)))
             }
             add(SettingsItem("manage_ports", R.string.setting_manage_ports, isEditable = true))
             add(SettingsItem("manage_tools", R.string.setting_manage_tools, isEditable = true))
@@ -715,13 +730,22 @@ class SettingsViewModel(
             }
         }
         "colors" -> listOf(
+            SettingsItem("color_background", R.string.setting_color_background, valueText = settings.colorBackground.uppercase(), isEditable = true, swatchColor = hexToColor(settings.colorBackground)),
             SettingsItem("color_text", R.string.setting_color_text, valueText = settings.colorText.uppercase(), isEditable = true, swatchColor = hexToColor(settings.colorText)),
+            SettingsItem("color_status_bar", R.string.setting_color_status_bar, valueText = settings.colorStatusBar.uppercase(), isEditable = true, swatchColor = hexToColor(settings.colorStatusBar)),
             SettingsItem("color_highlight", R.string.setting_color_highlight, valueText = settings.colorHighlight.uppercase(), isEditable = true, swatchColor = hexToColor(settings.colorHighlight)),
             SettingsItem("color_highlight_text", R.string.setting_color_highlight_text, valueText = settings.colorHighlightText.uppercase(), isEditable = true, swatchColor = hexToColor(settings.colorHighlightText)),
             SettingsItem("color_accent", R.string.setting_color_accent, valueText = settings.colorAccent.uppercase(), isEditable = true, swatchColor = hexToColor(settings.colorAccent))
         )
         "status_bar" -> buildList {
-            if (!isTelevision) add(SettingsItem("show_battery", R.string.setting_battery, valueRes = showHide(settings.showBattery)))
+            if (!isTelevision) {
+                val batteryRes = when (settings.batteryDisplay) {
+                    BatteryDisplay.HIDE -> R.string.value_hide
+                    BatteryDisplay.PERCENT -> R.string.value_percent
+                    BatteryDisplay.ICON -> R.string.value_icon
+                }
+                add(SettingsItem("show_battery", R.string.setting_battery, valueRes = batteryRes))
+            }
             add(SettingsItem("show_bluetooth", R.string.setting_bluetooth, valueRes = showHide(settings.showBluetooth)))
             add(SettingsItem("show_clock", R.string.setting_clock, valueRes = if (!settings.showClock) R.string.value_hide else if (settings.timeFormat == TimeFormat.TWELVE_HOUR) R.string.value_12h else R.string.value_24h))
             add(SettingsItem("show_update", R.string.setting_updater, valueRes = showHide(settings.showUpdate)))
@@ -729,31 +753,15 @@ class SettingsViewModel(
             add(SettingsItem("show_wifi", R.string.setting_wifi, valueRes = showHide(settings.showWifi)))
         }
         "input" -> listOf(
-            SettingsItem("profiles", R.string.setting_profiles, isEditable = true),
+            SettingsItem("controllers", R.string.setting_controllers, isEditable = true),
             SettingsItem("shortcuts", R.string.setting_shortcuts, isEditable = true),
-            SettingsItem("button_labels", R.string.setting_button_labels, valueText = settings.buttonLabelSet.name.lowercase().replaceFirstChar { it.uppercase() }),
-            SettingsItem("confirm_button", R.string.setting_confirm_button, valueText = settings.confirmButton.name.lowercase().replaceFirstChar { it.uppercase() }),
             SettingsItem("platform_switching", R.string.setting_platform_switching, valueRes = onOff(settings.platformSwitching)),
             SettingsItem("swap_play_resume", R.string.setting_swap_play_resume, valueRes = onOff(settings.swapPlayResume)),
             SettingsItem("main_menu_quit", R.string.setting_main_menu_quit, valueRes = onOff(settings.mainMenuQuit)),
             SettingsItem("input_tester", R.string.setting_input_tester, isEditable = true)
         )
-        "emulation" -> listOf(
-            SettingsItem("core_mapping", R.string.setting_core_mapping, isEditable = true),
-            SettingsItem("always_save_on_quit", R.string.setting_always_save_on_quit, valueRes = onOff(settings.alwaysSaveOnQuit))
-        )
-        "kitchen" -> emptyList()
-        "retroachievements" -> buildList {
-            add(SettingsItem("ra_username", R.string.setting_ra_username, valueText = settings.raUsername.ifEmpty { null }, valueRes = if (settings.raUsername.isEmpty()) R.string.value_not_set else null, isEditable = true))
-            add(SettingsItem("ra_password", R.string.setting_ra_password, valueText = if (raPassword.isEmpty()) null else BULLET.repeat(raPassword.length), valueRes = if (raPassword.isEmpty()) R.string.value_not_set else null, isEditable = true))
-            if (settings.raUsername.isNotEmpty() && raPassword.isNotEmpty()) {
-                add(SettingsItem("ra_login", R.string.setting_ra_login, isEditable = true))
-            }
-        }
-        "advanced" -> buildList {
-            add(SettingsItem("debug_logging", R.string.setting_debug_logging, valueRes = onOff(settings.debugLogging)))
-            add(SettingsItem("retroarch_diy_mode", R.string.setting_retroarch_diy_mode, valueRes = onOff(settings.retroArchDiyMode)))
-            add(SettingsItem("kitchen_code_bypass", R.string.setting_kitchen_code_bypass, valueRes = onOff(settings.kitchenCodeBypass)))
+        "emulation" -> buildList {
+            add(SettingsItem("core_mapping", R.string.setting_core_mapping, isEditable = true))
             val pkgs = detectInstalledRaPackages()
             if (pkgs.isNotEmpty() && settings.retroArchPackage !in pkgs) {
                 settings.retroArchPackage = pkgs.first()
@@ -763,6 +771,20 @@ class SettingsViewModel(
                 val pkgLabel = InstalledCoreService.getPackageLabel(settings.retroArchPackage)
                 add(SettingsItem("installed_cores", R.string.setting_installed_cores, labelText = "$pkgLabel Installed Cores", isEditable = true))
             }
+            add(SettingsItem("always_save_on_quit", R.string.setting_always_save_on_quit, valueRes = onOff(settings.alwaysSaveOnQuit)))
+        }
+        "kitchen" -> emptyList()
+        "retroachievements" -> buildList {
+            add(SettingsItem("ra_username", R.string.setting_ra_username, valueText = settings.raUsername.ifEmpty { null }, valueRes = if (settings.raUsername.isEmpty()) R.string.value_not_set else null, isEditable = true))
+            add(SettingsItem("ra_password", R.string.setting_ra_password, valueText = if (raPassword.isEmpty()) null else BULLET.repeat(raPassword.length), valueRes = if (raPassword.isEmpty()) R.string.value_not_set else null, isEditable = true))
+            if (settings.raUsername.isNotEmpty() && raPassword.isNotEmpty()) {
+                add(SettingsItem("ra_login", R.string.setting_ra_login, isEditable = true))
+            }
+        }
+        "advanced" -> buildList {
+            add(SettingsItem("logging", R.string.setting_logging, isEditable = true))
+            add(SettingsItem("retroarch_diy_mode", R.string.setting_retroarch_diy_mode, valueRes = onOff(settings.retroArchDiyMode)))
+            add(SettingsItem("kitchen_code_bypass", R.string.setting_kitchen_code_bypass, valueRes = onOff(settings.kitchenCodeBypass)))
             add(SettingsItem(
                 "release_channel",
                 R.string.settings_release_channel,
@@ -772,6 +794,9 @@ class SettingsViewModel(
                 add(SettingsItem("set_default_launcher", R.string.setting_set_default_launcher, isEditable = true))
             }
         }
+        "debug" -> listOf(
+            SettingsItem("audit_emulator_intents", R.string.setting_audit_emulator_intents, isEditable = true)
+        )
         else -> emptyList()
     }
 }

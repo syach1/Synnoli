@@ -6,6 +6,13 @@ object NaturalSort : Comparator<String> {
 
     private val chunkPattern = Regex("(\\d+|\\D+)")
 
+    fun toSortKey(name: String): String = buildString {
+        chunkPattern.findAll(name.lowercase(Locale.ROOT)).forEach { chunk ->
+            val v = chunk.value
+            if (v[0].isDigit()) append(v.padStart(10, '0')) else append(v)
+        }
+    }
+
     override fun compare(a: String, b: String): Int {
         val iterA = chunkPattern.findAll(a.lowercase(Locale.ROOT)).iterator()
         val iterB = chunkPattern.findAll(b.lowercase(Locale.ROOT)).iterator()

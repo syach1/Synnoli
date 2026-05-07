@@ -1,10 +1,12 @@
 package dev.cannoli.scorza.ui.viewmodel
 
 import androidx.compose.ui.geometry.Offset
+import dagger.hilt.android.scopes.ActivityScoped
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import javax.inject.Inject
 
 data class InputTesterState(
     val pressedButtons: Set<String> = emptySet(),
@@ -13,6 +15,7 @@ data class InputTesterState(
     val leftTrigger: Float = 0f,
     val rightTrigger: Float = 0f,
     val firstPressedAtMs: Long? = null,
+    val axisValues: Map<Int, Float> = emptyMap(),
 )
 
 data class EventLogEntry(
@@ -38,14 +41,18 @@ data class InputTesterUiState(
     val lastEventDevice: DeviceInfo? = null,
     val eventLog: List<EventLogEntry> = emptyList(),
     val exitRequested: Boolean = false,
-    val availableProfiles: List<String> = emptyList(),
-    val selectedProfile: String = "",
+    val axisDumpEnabled: Boolean = false,
 )
 
-class InputTesterViewModel(
-    private val now: () -> Long = System::currentTimeMillis,
-    private val eventLogCapacity: Int = DEFAULT_EVENT_LOG_CAPACITY,
-) {
+@ActivityScoped
+class InputTesterViewModel @Inject constructor() {
+    constructor(now: () -> Long, eventLogCapacity: Int = DEFAULT_EVENT_LOG_CAPACITY) : this() {
+        this.now = now
+        this.eventLogCapacity = eventLogCapacity
+    }
+
+    private var now: () -> Long = System::currentTimeMillis
+    private var eventLogCapacity: Int = DEFAULT_EVENT_LOG_CAPACITY
     private val _state = MutableStateFlow(InputTesterUiState())
     val state: StateFlow<InputTesterUiState> = _state.asStateFlow()
 
@@ -54,31 +61,19 @@ class InputTesterViewModel(
         heldKeyCodes.clear()
     }
 
-    fun setProfiles(available: List<String>, selected: String) {
-        _state.update { it.copy(availableProfiles = available, selectedProfile = selected) }
-    }
-
-    fun cycleProfile(forward: Boolean, keepPressed: Set<String> = emptySet()): String {
-        var result = _state.value.selectedProfile
-        _state.update { current ->
-            val list = current.availableProfiles
-            if (list.isEmpty()) return@update current
-            val idx = list.indexOf(current.selectedProfile).let { if (it < 0) 0 else it }
-            val step = if (forward) 1 else -1
-            val next = list[((idx + step) + list.size) % list.size]
-            result = next
-            val clearedPorts = current.portStates.mapValues { (_, s) ->
-                s.copy(
-                    pressedButtons = s.pressedButtons intersect keepPressed,
-                    firstPressedAtMs = if ((s.pressedButtons intersect keepPressed).isNotEmpty()) s.firstPressedAtMs else null,
-                )
-            }
-            current.copy(selectedProfile = next, portStates = clearedPorts)
-        }
-        return result
-    }
-
     private val heldKeyCodes = mutableSetOf<Int>()
+
+    fun toggleAxisDump() {
+        _state.update { it.copy(axisDumpEnabled = !it.axisDumpEnabled) }
+    }
+
+    fun recordAxisValues(port: Int, values: Map<Int, Float>) {
+        _state.update { current ->
+            val prev = current.portStates[port] ?: InputTesterState()
+            val updatedPort = prev.copy(axisValues = values)
+            current.copy(portStates = current.portStates + (port to updatedPort))
+        }
+    }
 
     fun requestExit() {
         _state.update { it.copy(exitRequested = true) }
@@ -149,16 +144,12 @@ class InputTesterViewModel(
                 if (hatY < -0.5f) add("btn_up")
                 if (hatY > 0.5f) add("btn_down")
             }
-            val triggerButtons = buildSet {
-                if (leftTrigger > 0.5f) add("btn_l2")
-                if (rightTrigger > 0.5f) add("btn_r2")
-            }
-            val axisPressed = hatButtons + triggerButtons
+            val axisPressed = hatButtons
 
-            val nonAxis = prev.pressedButtons - HAT_BUTTONS - TRIGGER_BUTTONS
+            val nonAxis = prev.pressedButtons - HAT_BUTTONS
             val newPressed = nonAxis + axisPressed
 
-            val newlyPressed = axisPressed - (prev.pressedButtons intersect HAT_BUTTONS) - (prev.pressedButtons intersect TRIGGER_BUTTONS)
+            val newlyPressed = axisPressed - (prev.pressedButtons intersect HAT_BUTTONS)
             val synthLogEntries = newlyPressed.map { btn ->
                 EventLogEntry(
                     keyCode = -1,

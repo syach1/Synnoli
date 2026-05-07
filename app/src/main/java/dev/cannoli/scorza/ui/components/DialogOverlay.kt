@@ -143,7 +143,6 @@ fun DialogOverlay(
         is DialogState.RenameInput,
         is DialogState.NewCollectionInput,
         is DialogState.CollectionRenameInput,
-        is DialogState.ProfileNameInput,
         is DialogState.NewFolderInput -> {
             val ks = dialogState as KeyboardInputState
             KeyboardOverlay(
@@ -191,6 +190,10 @@ fun DialogOverlay(
 
         is DialogState.RestartRequired -> {
             RestartOverlay(message = stringResource(R.string.restart_required), buttonStyle = buttonStyle)
+        }
+
+        is DialogState.IntentAuditResult -> {
+            RestartOverlay(message = dialogState.message, buttonStyle = buttonStyle)
         }
 
         else -> {}

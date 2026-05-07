@@ -1,33 +1,32 @@
 package dev.cannoli.scorza.launcher
 
 import android.app.ActivityOptions
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Environment
 import android.os.StrictMode
 import android.provider.Settings
 import androidx.core.content.FileProvider
+import dagger.hilt.android.qualifiers.ApplicationContext
+import dev.cannoli.scorza.config.AppConfig
+import dev.cannoli.scorza.config.LaunchMethod
 import java.io.File
+import javax.inject.Inject
+import javax.inject.Singleton
 
-class ApkLauncher(private val context: Context) {
+@Singleton
+class ApkLauncher @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val shellLauncher: ShellLauncher,
+) {
 
     var debugLog: (String) -> Unit = {}
+        set(value) { field = value; shellLauncher.debugLog = value }
 
     companion object {
         const val VIRTUAL_TV_SETTINGS_PACKAGE = "cannoli.virtual.tv_settings"
     }
-
-    enum class DataKind { NONE, SAF, PROVIDER, PATH }
-
-    data class AppLaunchConfig(
-        val activityName: String? = null,
-        val action: String? = null,
-        val data: DataKind = DataKind.NONE,
-        val extraKey: String? = null,
-        val extraKind: DataKind = DataKind.NONE
-    )
 
     fun launch(packageName: String): LaunchResult {
         val intent = if (packageName == VIRTUAL_TV_SETTINGS_PACKAGE) {
@@ -48,53 +47,34 @@ class ApkLauncher(private val context: Context) {
         }
     }
 
-    fun launchWithRom(
-        packageName: String,
-        romFile: File,
-        config: AppLaunchConfig = AppLaunchConfig()
-    ): LaunchResult {
-        debugLog("ApkLauncher.launchWithRom pkg=$packageName rom=${romFile.absolutePath} config=$config")
-
+    fun launchWithRom(packageName: String, romFile: File, config: AppConfig): LaunchResult {
+        debugLog("ApkLauncher.launchWithRom pkg=$packageName rom=${romFile.absolutePath} method=${config.launchMethod}")
         if (!context.isPackageInstalled(packageName)) {
             debugLog("  -> package not installed")
             return LaunchResult.AppNotInstalled(packageName)
         }
+        val resolved = EmulatorIntentBuilder.resolve(context, config, romFile)
+        return when (config.launchMethod) {
+            LaunchMethod.INTENT -> dispatchIntent(resolved, config, romFile, packageName)
+            LaunchMethod.SHELL  -> shellLauncher.launch(ShellCommandFormatter.format(resolved))
+        }
+    }
 
-        if (config.data == DataKind.NONE && config.extraKey == null && config.action == null && config.activityName == null) {
-            debugLog("  -> fallback ACTION_VIEW + FileProvider")
+    private fun dispatchIntent(
+        resolved: ResolvedIntent,
+        config: AppConfig,
+        romFile: File,
+        packageName: String,
+    ): LaunchResult {
+        val intent = EmulatorIntentBuilder.toAndroidIntent(context, resolved, config)
+        debugLog("  intent built: action=${intent.action} component=${intent.component?.flattenToShortString()}")
+        if (context.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) == null) {
+            debugLog("  -> intent did not resolve; falling back to ACTION_VIEW + FileProvider")
+            logExposedActivities(packageName)
             return launchViewWithFileProvider(packageName, romFile)
         }
-
-        val intent = Intent().apply {
-            if (config.activityName != null) {
-                component = ComponentName(packageName, config.activityName)
-            } else {
-                setPackage(packageName)
-            }
-            config.action?.let { action = it }
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-
-        if (config.data != DataKind.NONE) {
-            val uri = buildUri(packageName, romFile, config.data, grantOnExtra = false, intent)
-            intent.setDataAndType(uri, "*/*")
-            if (config.data == DataKind.PROVIDER) {
-                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-        }
-
-        if (config.extraKey != null && config.extraKind != DataKind.NONE) {
-            val value = when (config.extraKind) {
-                DataKind.PATH -> romFile.absolutePath
-                else -> buildUri(packageName, romFile, config.extraKind, grantOnExtra = true, intent).toString()
-            }
-            intent.putExtra(config.extraKey, value)
-        }
-
-        logIntent(intent)
-
         val opts = ActivityOptions.makeCustomAnimation(context, 0, 0).toBundle()
-        val previousVmPolicy = if (config.data == DataKind.PATH) {
+        val previousVmPolicy = if (resolved.dataUri?.scheme == "file") {
             val current = StrictMode.getVmPolicy()
             StrictMode.setVmPolicy(StrictMode.VmPolicy.Builder().build())
             current
@@ -111,26 +91,20 @@ class ApkLauncher(private val context: Context) {
         }
     }
 
-    @Suppress("DEPRECATION")
-    private fun logIntent(intent: Intent) {
-        val sb = StringBuilder("  intent:")
-        sb.append(" action=").append(intent.action)
-        sb.append(" component=").append(intent.component?.flattenToShortString())
-        sb.append(" package=").append(intent.`package`)
-        sb.append(" data=").append(intent.data)
-        sb.append(" flags=0x").append(Integer.toHexString(intent.flags))
-        val extras = intent.extras
-        if (extras != null) {
-            sb.append(" extras={")
-            var first = true
-            for (k in extras.keySet()) {
-                if (!first) sb.append(", ")
-                first = false
-                sb.append(k).append('=').append(extras.get(k))
-            }
-            sb.append('}')
+    private fun logExposedActivities(packageName: String) {
+        val probe = Intent().setPackage(packageName)
+        @Suppress("DEPRECATION")
+        val resolved = context.packageManager.queryIntentActivities(probe, PackageManager.GET_RESOLVED_FILTER)
+        if (resolved.isEmpty()) {
+            debugLog("  exposed activities: <none discovered>")
+            return
         }
-        debugLog(sb.toString())
+        debugLog("  exposed activities for $packageName:")
+        for (info in resolved) {
+            val activity = info.activityInfo?.name ?: "?"
+            val actions = info.filter?.let { f -> (0 until f.countActions()).map { f.getAction(it) } } ?: emptyList()
+            debugLog("    - $activity actions=$actions")
+        }
     }
 
     private fun launchViewWithFileProvider(packageName: String, romFile: File): LaunchResult {
@@ -145,8 +119,6 @@ class ApkLauncher(private val context: Context) {
             setPackage(packageName)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-
-        logIntent(viewIntent)
 
         val opts = ActivityOptions.makeCustomAnimation(context, 0, 0).toBundle()
         return try {
@@ -168,49 +140,5 @@ class ApkLauncher(private val context: Context) {
                 LaunchResult.Error(e.message ?: "Failed to launch emulator")
             }
         }
-    }
-
-    private fun buildUri(
-        packageName: String,
-        romFile: File,
-        kind: DataKind,
-        grantOnExtra: Boolean,
-        intent: Intent
-    ): Uri = when (kind) {
-        DataKind.SAF -> buildSafDocumentUri(romFile)
-        DataKind.PROVIDER -> {
-            val uri = FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                romFile
-            )
-            if (grantOnExtra) {
-                context.grantUriPermission(packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            uri
-        }
-        DataKind.PATH -> Uri.fromFile(romFile)
-        DataKind.NONE -> Uri.EMPTY
-    }
-
-    private fun buildSafDocumentUri(romFile: File): Uri {
-        val absolute = romFile.absolutePath
-        val primaryRoot = Environment.getExternalStorageDirectory().absolutePath
-        val (volumeId, relative) = when {
-            absolute.startsWith("$primaryRoot/") ->
-                "primary" to absolute.substring(primaryRoot.length + 1)
-            absolute.startsWith("/storage/") -> {
-                val after = absolute.removePrefix("/storage/")
-                val slash = after.indexOf('/')
-                if (slash < 0) "primary" to absolute.removePrefix("$primaryRoot/")
-                else after.substring(0, slash) to after.substring(slash + 1)
-            }
-            else -> "primary" to absolute
-        }
-        val docId = "$volumeId:$relative"
-        return Uri.parse("content://com.android.externalstorage.documents/document")
-            .buildUpon()
-            .appendPath(docId)
-            .build()
     }
 }

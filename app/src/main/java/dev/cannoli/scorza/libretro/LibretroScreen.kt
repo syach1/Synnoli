@@ -19,6 +19,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -37,6 +39,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import dev.cannoli.scorza.input.v2.runtime.confirmButton
+import dev.cannoli.scorza.input.v2.runtime.labelSet
 import dev.cannoli.igm.GuideScreen
 import dev.cannoli.igm.GuideType
 import dev.cannoli.igm.IGMScreen
@@ -56,7 +60,7 @@ import dev.cannoli.ui.DPAD_HORIZONTAL
 import dev.cannoli.ui.HALF_CIRCLE
 import dev.cannoli.ui.components.BottomBar
 import dev.cannoli.ui.components.LocalStatusBarLeftEdge
-import dev.cannoli.ui.components.OsdPill
+import dev.cannoli.ui.components.OsdHost
 import dev.cannoli.ui.components.ScreenBackground
 import dev.cannoli.ui.components.ScreenTitle
 import dev.cannoli.ui.components.StatusBar
@@ -80,7 +84,8 @@ data class GameInfo(
     val originalRomPath: String? = null,
     val rendererName: String = "",
     val raStatus: String? = null,
-    val raGameId: String? = null
+    val raGameId: String? = null,
+    val raDetection: String? = null
 )
 
 @Composable
@@ -96,15 +101,13 @@ fun LibretroScreen(
     undoLabel: String?,
     settingsItems: List<IGMSettingsItem>,
     coreInfo: String,
-    input: LibretroInput,
-    profileName: String = "",
-    profileNames: List<String> = emptyList(),
     debugHud: Boolean,
     renderer: LibretroRenderer,
     runner: LibretroRunner,
     audioSampleRate: Int,
-    osdMessage: String?,
+    osdController: dev.cannoli.ui.components.OsdController,
     fastForwarding: Boolean,
+    settings: dev.cannoli.scorza.settings.SettingsRepository,
     guideFiles: List<GuideFile> = emptyList(),
     guidePageCount: Int = 0,
     guideScrollDir: Int = 0,
@@ -115,7 +118,12 @@ fun LibretroScreen(
     guideInitialScrollX: Int = 0,
     onGuideScrollChanged: (y: Int, x: Int) -> Unit = { _, _ -> },
     infoScrollDir: Int = 0,
-    gameInfo: GameInfo = GameInfo("", "", null)
+    gameInfo: GameInfo = GameInfo("", "", null),
+    activeMapping: dev.cannoli.scorza.input.v2.DeviceMapping? = null,
+    controllersViewModel: dev.cannoli.scorza.ui.viewmodel.ControllersViewModel? = null,
+    mappingRepository: dev.cannoli.scorza.input.v2.repo.MappingRepository? = null,
+    editButtonsController: dev.cannoli.scorza.input.EditButtonsController? = null,
+    onClearListening: () -> Unit = {},
 ) {
     val overlayVisible = screen != null
     val showDescription = when (screen) {
@@ -125,13 +133,12 @@ fun LibretroScreen(
     }
     val isGuideScreen = screen is IGMScreen.Guide
     val context = LocalContext.current
-    val settings = remember { dev.cannoli.scorza.settings.SettingsRepository(context) }
     val igmFontSize = settings.textSize.sp.sp
     val igmLineHeight = (settings.textSize.sp + 10).sp
     val igmScaleFactor = settings.textSize.sp / 22f
     val igmTypography = buildCannoliTypography(baseSizeSp = settings.textSize.sp, fontFamily = LocalCannoliFont.current)
-    val labels = ButtonStyle(settings.buttonLabelSet, settings.confirmButton)
-    val statusBarEnabled = (settings.showWifi || settings.showBluetooth || settings.showClock || settings.showBattery || settings.showVpn) && !showDescription && !isGuideScreen
+    val labels = ButtonStyle(activeMapping.labelSet(dev.cannoli.ui.ButtonLabelSet.PLUMBER), activeMapping.confirmButton())
+    val statusBarEnabled = (settings.showWifi || settings.showBluetooth || settings.showClock || settings.batteryDisplay != dev.cannoli.scorza.settings.BatteryDisplay.HIDE || settings.showVpn) && !showDescription && !isGuideScreen
     val statusBarLeftEdge = remember { mutableIntStateOf(Int.MAX_VALUE) }
 
     val portraitMarginState = PortraitMarginState(
@@ -203,68 +210,6 @@ fun LibretroScreen(
                     }
                 }
             }
-            is IGMScreen.Controls -> {
-                val activeLabel = stringResource(R.string.value_active)
-                if (screen.menuOpen) {
-                    val menuItems = listOf(
-                        IGMSettingsItem(label = stringResource(R.string.context_rename)),
-                        IGMSettingsItem(label = stringResource(R.string.context_delete))
-                    )
-                    IGMSettingsScreen(
-                        title = profileNames.getOrNull(screen.selectedIndex) ?: "",
-                        items = menuItems,
-                        selectedIndex = screen.menuIndex,
-                        bottomBarLeft = listOf(labels.back to stringResource(R.string.label_cancel)),
-                        bottomBarRight = listOf(labels.confirm to stringResource(R.string.label_select)),
-                        fontSize = igmFontSize,
-                        lineHeight = igmLineHeight
-                    )
-                } else {
-                    val items = profileNames.map { name ->
-                        IGMSettingsItem(
-                            label = name,
-                            value = if (name == profileName) activeLabel else null
-                        )
-                    }
-                    IGMSettingsScreen(
-                        title = stringResource(R.string.title_controls),
-                        items = items,
-                        selectedIndex = screen.selectedIndex,
-                        bottomBarLeft = listOf(labels.back to stringResource(R.string.label_back), labels.west to stringResource(R.string.label_new)),
-                        bottomBarRight = listOf(labels.north to stringResource(R.string.label_edit), labels.confirm to stringResource(R.string.label_select)),
-                        fontSize = igmFontSize,
-                        lineHeight = igmLineHeight
-                    )
-                }
-            }
-            is IGMScreen.ControlEdit -> {
-                val selectedBtn = input.buttons.getOrNull(screen.selectedIndex)
-                val canUnmap = selectedBtn != null
-                        && selectedBtn.prefKey != "btn_menu"
-                        && input.getKeyCodeFor(selectedBtn) != LibretroInput.UNMAPPED
-                        && screen.listeningIndex < 0
-                ControlsScreen(
-                    input = input,
-                    selectedIndex = screen.selectedIndex,
-                    listeningIndex = screen.listeningIndex,
-                    listenCountdownMs = screen.listenCountdownMs,
-                    profileName = profileName,
-                    canUnmapSelected = canUnmap,
-                    fontSize = igmFontSize,
-                    lineHeight = igmLineHeight,
-                    buttonStyle = labels
-                )
-            }
-            is IGMScreen.ProfileName -> {
-                dev.cannoli.ui.components.KeyboardOverlay(
-                    text = screen.name,
-                    cursorPos = screen.cursorPos,
-                    keyRow = screen.keyRow,
-                    keyCol = screen.keyCol,
-                    caps = screen.caps,
-                    symbols = screen.symbols
-                )
-            }
             is IGMScreen.Settings, is IGMScreen.Video, is IGMScreen.Advanced,
             is IGMScreen.ShaderSettings,
             is IGMScreen.Emulator, is IGMScreen.EmulatorCategory,
@@ -276,13 +221,18 @@ fun LibretroScreen(
                     (screen is IGMScreen.Emulator && settingsItems.all { it.value != null })
                 val changeLabel = stringResource(R.string.label_change)
                 val selectLabel = stringResource(R.string.label_select)
+                val showsCycleHint = isOptionList ||
+                    (screen is IGMScreen.Shortcuts && screen.selectedIndex == 0) ||
+                    screen is IGMScreen.Video ||
+                    screen is IGMScreen.Advanced ||
+                    screen is IGMScreen.ShaderSettings
                 val bottomBarRight = when {
-                    isOptionList -> listOf(labels.confirm to stringResource(R.string.label_info), DPAD_HORIZONTAL to changeLabel)
-                    screen is IGMScreen.Shortcuts && screen.selectedIndex == 0 -> listOf(DPAD_HORIZONTAL to changeLabel)
+                    isOptionList -> listOf(labels.confirm to stringResource(R.string.label_info))
+                    screen is IGMScreen.Shortcuts && screen.selectedIndex == 0 -> emptyList()
                     screen is IGMScreen.Shortcuts -> listOf(labels.north to stringResource(R.string.label_clear), labels.confirm to stringResource(R.string.label_set))
-                    screen is IGMScreen.Video -> listOf(labels.confirm to selectLabel, DPAD_HORIZONTAL to changeLabel)
-                    screen is IGMScreen.Advanced -> listOf(DPAD_HORIZONTAL to changeLabel)
-                    screen is IGMScreen.ShaderSettings -> listOf(DPAD_HORIZONTAL to changeLabel)
+                    screen is IGMScreen.Video -> listOf(labels.confirm to selectLabel)
+                    screen is IGMScreen.Advanced -> emptyList()
+                    screen is IGMScreen.ShaderSettings -> emptyList()
                     else -> listOf(labels.confirm to selectLabel)
                 }
                 val emulatorLabel = stringResource(R.string.igm_emulator)
@@ -297,11 +247,15 @@ fun LibretroScreen(
                     is IGMScreen.SavePrompt -> stringResource(R.string.igm_save_changes)
                     else -> stringResource(R.string.igm_settings)
                 }
+                val bottomBarLeft = buildList {
+                    add(labels.back to stringResource(R.string.label_back))
+                    if (showsCycleHint) add(DPAD_HORIZONTAL to changeLabel)
+                }
                 IGMSettingsScreen(
                     title = title,
                     items = settingsItems,
                     selectedIndex = screen.selectedIndex,
-                    bottomBarLeft = listOf(labels.back to stringResource(R.string.label_back)),
+                    bottomBarLeft = bottomBarLeft,
                     bottomBarRight = bottomBarRight,
                     coreInfo = coreInfo,
                     description = description,
@@ -371,6 +325,10 @@ fun LibretroScreen(
                                 if (gameInfo.raGameId != null) {
                                     Spacer(modifier = Modifier.height(12.dp))
                                     InfoRow(stringResource(R.string.info_game_id), gameInfo.raGameId, infoModifier)
+                                }
+                                if (gameInfo.raDetection != null) {
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    InfoRow(stringResource(R.string.info_ra_detection), gameInfo.raDetection, infoModifier)
                                 }
                             }
                         }
@@ -507,6 +465,101 @@ fun LibretroScreen(
                     }
                 }
             }
+            is IGMScreen.Controllers -> {
+                if (controllersViewModel != null) {
+                    dev.cannoli.scorza.ui.screens.ControllersScreen(
+                        screen = dev.cannoli.scorza.navigation.LauncherScreen.Controllers(selectedIndex = screen.selectedIndex),
+                        viewModel = controllersViewModel,
+                        modifier = Modifier.fillMaxSize(),
+                        listFontSize = igmFontSize,
+                        listLineHeight = igmLineHeight,
+                        buttonStyle = labels,
+                    )
+                }
+            }
+            is IGMScreen.ControllerDetail -> {
+                if (controllersViewModel != null) {
+                    val controllersState = controllersViewModel.state.collectAsState().value
+                    val mapping = controllersState.connected.firstOrNull { it.mapping.id == screen.mappingId }?.mapping
+                        ?: controllersState.savedMappings.firstOrNull { it.id == screen.mappingId }
+                    dev.cannoli.scorza.ui.screens.ControllerDetailScreen(
+                        screen = dev.cannoli.scorza.navigation.LauncherScreen.ControllerDetail(
+                            mappingId = screen.mappingId,
+                            androidDeviceId = screen.androidDeviceId,
+                            selectedIndex = screen.selectedIndex,
+                        ),
+                        mapping = mapping,
+                        modifier = Modifier.fillMaxSize(),
+                        listFontSize = igmFontSize,
+                        listLineHeight = igmLineHeight,
+                        buttonStyle = labels,
+                    )
+                }
+            }
+            is IGMScreen.EditButtons -> {
+                val parsedListening = screen.listeningCanonical?.let { name ->
+                    runCatching { dev.cannoli.scorza.input.v2.CanonicalButton.valueOf(name) }.getOrNull()
+                }
+                val ebState = controllersViewModel?.state?.collectAsState()?.value
+                val mapping = ebState?.connected?.firstOrNull { it.mapping.id == screen.mappingId }?.mapping
+                    ?: ebState?.savedMappings?.firstOrNull { it.id == screen.mappingId }
+                    ?: mappingRepository?.findById(screen.mappingId)
+                if (editButtonsController != null) {
+                    LaunchedEffect(screen.listeningCanonical) {
+                        if (parsedListening != null) {
+                            while (true) {
+                                kotlinx.coroutines.delay(50)
+                                val finalized = editButtonsController.tickAndMaybeFinalize()
+                                if (finalized != null || !editButtonsController.isListening) {
+                                    onClearListening()
+                                    break
+                                }
+                            }
+                        }
+                    }
+                }
+                dev.cannoli.scorza.ui.screens.EditButtonsScreen(
+                    screen = dev.cannoli.scorza.navigation.LauncherScreen.EditButtons(
+                        mappingId = screen.mappingId,
+                        listeningCanonical = parsedListening,
+                        countdownMs = screen.countdownMs,
+                        selectedIndex = screen.selectedIndex,
+                    ),
+                    mapping = mapping,
+                    modifier = Modifier.fillMaxSize(),
+                    listFontSize = igmFontSize,
+                    listLineHeight = igmLineHeight,
+                    buttonStyle = labels,
+                )
+            }
+            is IGMScreen.ReassignPlayers -> {
+                val controllersState = controllersViewModel?.state?.collectAsState()?.value
+                val portToName = (controllersState?.connected.orEmpty())
+                    .filter { it.port != null }
+                    .associate { it.port!! to it.mapping.displayName }
+                val items = (0 until 4).map { port ->
+                    val name = portToName[port] ?: "—"
+                    val display = if (port == screen.swapWithIndex) "→ $name" else name
+                    IGMSettingsItem(
+                        label = "Player ${port + 1}",
+                        value = display,
+                    )
+                }
+                val confirmLabel = when {
+                    screen.swapWithIndex < 0 -> stringResource(R.string.label_select)
+                    screen.swapWithIndex == screen.selectedIndex -> stringResource(R.string.label_cancel)
+                    else -> stringResource(R.string.label_swap)
+                }
+                IGMSettingsScreen(
+                    title = stringResource(R.string.igm_reassign_players),
+                    items = items,
+                    selectedIndex = screen.selectedIndex,
+                    bottomBarLeft = listOf(labels.back to stringResource(R.string.label_back)),
+                    bottomBarRight = listOf(labels.confirm to confirmLabel),
+                    fontSize = igmFontSize,
+                    lineHeight = igmLineHeight,
+                )
+            }
             null -> {}
         }
 
@@ -533,7 +586,7 @@ fun LibretroScreen(
                     Spacer(modifier = Modifier.height(Spacing.Sm))
                     Text(
                         text = if (screen.heldKeys.isEmpty()) stringResource(R.string.shortcut_hold_prompt)
-                        else screen.heldKeys.joinToString(" + ") { LibretroInput.keyCodeName(it) },
+                        else screen.heldKeys.joinToString(" + ") { dev.cannoli.scorza.util.keyCodeName(it) },
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontSize = 16.sp,
                             color = colors.text.copy(alpha = 0.6f)
@@ -562,7 +615,8 @@ fun LibretroScreen(
             }
         }
 
-        if (debugHud && !overlayVisible) {
+        val osdRequest = osdController.request.value
+        if (debugHud && !overlayVisible && osdRequest == null) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopStart)
@@ -577,12 +631,12 @@ fun LibretroScreen(
             }
         }
 
-        if (fastForwarding && !overlayVisible && osdMessage == null) {
+        if (fastForwarding && !overlayVisible) {
             val colors = LocalCannoliColors.current
             Box(
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 20.dp)
+                    .align(Alignment.TopEnd)
+                    .padding(top = 16.dp, end = 16.dp)
                     .clip(Radius.Pill)
                     .background(colors.highlight)
                     .padding(horizontal = 16.dp, vertical = 6.dp)
@@ -595,9 +649,7 @@ fun LibretroScreen(
             }
         }
 
-        if (osdMessage != null) {
-            OsdPill(message = osdMessage)
-        }
+        OsdHost(controller = osdController)
 
         if (statusBarEnabled) {
             Box(
@@ -614,7 +666,8 @@ fun LibretroScreen(
                     showBluetooth = settings.showBluetooth,
                     showVpn = settings.showVpn,
                     showClock = settings.showClock,
-                    showBattery = settings.showBattery && !context.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK),
+                    showBattery = settings.batteryDisplay != dev.cannoli.scorza.settings.BatteryDisplay.HIDE && !context.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK),
+                    batteryIconOnly = settings.batteryDisplay == dev.cannoli.scorza.settings.BatteryDisplay.ICON,
                     use24hTime = settings.timeFormat == dev.cannoli.scorza.settings.TimeFormat.TWENTY_FOUR_HOUR
                 )
             }

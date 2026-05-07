@@ -4,8 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import android.os.Build
 import androidx.core.content.FileProvider
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.cannoli.scorza.BuildConfig
 import dev.cannoli.scorza.settings.SettingsRepository
 import kotlinx.coroutines.Dispatchers
@@ -16,9 +16,12 @@ import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import javax.inject.Inject
+import javax.inject.Singleton
 
-class UpdateManager(
-    private val context: Context,
+@Singleton
+class UpdateManager @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val settings: SettingsRepository
 ) {
     private val _updateAvailable = MutableStateFlow<UpdateInfo?>(loadCached())
@@ -160,14 +163,11 @@ class UpdateManager(
     }
 
     fun isOnline(): Boolean {
-        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val net = cm.activeNetwork ?: return false
-            val caps = cm.getNetworkCapabilities(net) ?: return false
-            return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-        }
-        @Suppress("DEPRECATION")
-        return cm.activeNetworkInfo?.isConnected == true
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return false
+        val net = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(net) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
     private fun fetchJson(urlStr: String): JSONObject {

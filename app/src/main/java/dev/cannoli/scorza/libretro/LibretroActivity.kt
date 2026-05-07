@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -30,6 +31,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
+import dagger.hilt.android.AndroidEntryPoint
 import dev.cannoli.igm.AchievementInfo
 import dev.cannoli.igm.GuideType
 import dev.cannoli.igm.IGMScreen
@@ -38,32 +40,38 @@ import dev.cannoli.igm.IGMSettingsItem
 import dev.cannoli.igm.InGameMenuOptions
 import dev.cannoli.igm.ShortcutAction
 import dev.cannoli.scorza.R
-import dev.cannoli.scorza.input.ControllerManager
-import dev.cannoli.scorza.input.ProfileManager
 import dev.cannoli.scorza.libretro.shader.PresetParser
 import dev.cannoli.scorza.libretro.shader.ShaderPipeline
 import dev.cannoli.scorza.settings.SettingsRepository
 import dev.cannoli.scorza.util.SessionLog
 import dev.cannoli.ui.STAR
-import dev.cannoli.ui.theme.BPReplay
 import dev.cannoli.ui.theme.CannoliColors
 import dev.cannoli.ui.theme.CannoliTheme
 import dev.cannoli.ui.theme.LocalCannoliColors
-import dev.cannoli.ui.theme.MPlus1Code
+import androidx.compose.runtime.collectAsState
+import dev.cannoli.scorza.input.v2.runtime.confirmButton
+import dev.cannoli.scorza.input.v2.runtime.labelSet
+import dev.cannoli.ui.components.OsdPosition
 import dev.cannoli.ui.theme.hexToColor
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class LibretroActivity : ComponentActivity() {
+
+    @Inject lateinit var settings: SettingsRepository
+    @Inject lateinit var portRouter: dev.cannoli.scorza.input.v2.runtime.PortRouter
+    @Inject lateinit var controllerV2Bridge: dev.cannoli.scorza.input.v2.runtime.ControllerV2Bridge
+    @Inject lateinit var activeMappingHolder: dev.cannoli.scorza.input.v2.runtime.ActiveMappingHolder
+    @Inject lateinit var controllersViewModel: dev.cannoli.scorza.ui.viewmodel.ControllersViewModel
+    @Inject lateinit var editButtonsController: dev.cannoli.scorza.input.EditButtonsController
+    @Inject lateinit var mappingRepository: dev.cannoli.scorza.input.v2.repo.MappingRepository
+    @Inject lateinit var bindingController: dev.cannoli.scorza.input.BindingController
 
     private lateinit var runner: LibretroRunner
     private lateinit var renderer: LibretroRenderer
-    private lateinit var input: LibretroInput
-    private lateinit var controllerManager: ControllerManager
-    private lateinit var profileManager: ProfileManager
-    private lateinit var autoconfigLoader: dev.cannoli.scorza.input.autoconfig.AutoconfigLoader
-    private lateinit var autoconfigMatcher: dev.cannoli.scorza.input.autoconfig.AutoconfigMatcher
     private lateinit var slotManager: SaveSlotManager
     private lateinit var overrideManager: OverrideManager
     private var glSurfaceView: GLSurfaceView? = null
@@ -93,7 +101,7 @@ class LibretroActivity : ComponentActivity() {
     }
     private var loading by mutableStateOf(true)
     private var revealed by mutableStateOf(false)
-    private var missingBios by mutableStateOf<List<dev.cannoli.scorza.scanner.FirmwareEntry>>(emptyList())
+    private var missingBios by mutableStateOf<List<dev.cannoli.scorza.config.FirmwareEntry>>(emptyList())
 
     private val screenStack = mutableStateListOf<IGMScreen>()
 
@@ -118,10 +126,10 @@ class LibretroActivity : ComponentActivity() {
 
     private var coreOptions by mutableStateOf(emptyList<LibretroRunner.CoreOption>())
     private var coreCategories by mutableStateOf(emptyList<LibretroRunner.CoreOptionCategory>())
+    private var coreRequiresHwRender = false
     private var controllerTypes by mutableStateOf(emptyList<LibretroRunner.ControllerType>())
     private var controllerTypeIndex by mutableIntStateOf(0)
-    private var currentProfileName by mutableStateOf(ProfileManager.DEFAULT_GAME)
-    private var profileNames by mutableStateOf(listOf(ProfileManager.DEFAULT_GAME))
+    private var portDeviceTypes by mutableStateOf<Map<Int, Int>>(emptyMap())
     private var shortcutSource by mutableStateOf(OverrideSource.GLOBAL)
     private var shortcuts by mutableStateOf(mapOf<ShortcutAction, Set<Int>>())
     private val shortcutChordKeys = mutableSetOf<Int>()
@@ -134,14 +142,31 @@ class LibretroActivity : ComponentActivity() {
     private var shaderParamsDirty = false
     private var lastShaderCycleMs = 0L
     private var platformBaseline: OverrideManager.Settings? = null
-    private var defaultProfileControls = emptyMap<String, Int>()
-    private val navInputHandler = dev.cannoli.scorza.input.InputHandler { defaultProfileControls }
 
     private var diskCount by mutableIntStateOf(0)
     private var currentDiskIndex by mutableIntStateOf(0)
     private var diskLabels = emptyList<String>()
 
     private var raManager: RetroAchievementsManager? = null
+    private var raInfoTick by mutableIntStateOf(0)
+
+    private val raPausedIdleHandler = Handler(Looper.getMainLooper())
+    private val raPausedIdleRunnable = object : Runnable {
+        override fun run() {
+            raManager?.idle()
+            raInfoTick++
+            if (renderer.paused) raPausedIdleHandler.postDelayed(this, 200L)
+        }
+    }
+
+    private fun startRaPausedIdle() {
+        raPausedIdleHandler.removeCallbacks(raPausedIdleRunnable)
+        raPausedIdleHandler.post(raPausedIdleRunnable)
+    }
+
+    private fun stopRaPausedIdle() {
+        raPausedIdleHandler.removeCallbacks(raPausedIdleRunnable)
+    }
 
     private var audioSampleRate = 0
     private var fastForwarding by mutableStateOf(false)
@@ -166,9 +191,7 @@ class LibretroActivity : ComponentActivity() {
     private var undoSlot: Slot? = null
     private val undoHandler = Handler(Looper.getMainLooper())
     private val clearUndoRunnable = Runnable { clearUndo() }
-    private var osdMessage by mutableStateOf<String?>(null)
-    private val osdHandler = Handler(Looper.getMainLooper())
-    private val clearOsdRunnable = Runnable { osdMessage = null }
+    @Inject lateinit var osdController: dev.cannoli.ui.components.OsdController
     private var gameTitle: String = ""
     private var corePath: String = ""
     private var romPath: String = ""
@@ -185,10 +208,10 @@ class LibretroActivity : ComponentActivity() {
     private val currentSlot get() = slotManager.slots[selectedSlotIndex]
     private val currentScreen get() = screenStack.lastOrNull()
     private val hasDiscs get() = diskCount > 1
-    private val alwaysSaveOnQuit: Boolean by lazy { dev.cannoli.scorza.settings.SettingsRepository(this).alwaysSaveOnQuit }
+    private val alwaysSaveOnQuit: Boolean get() = settings.alwaysSaveOnQuit
 
     @androidx.compose.runtime.Composable
-    private fun MissingBiosScreen(entries: List<dev.cannoli.scorza.scanner.FirmwareEntry>) {
+    private fun MissingBiosScreen(entries: List<dev.cannoli.scorza.config.FirmwareEntry>) {
         val header = getString(R.string.dialog_missing_bios_header, "Cannoli/BIOS/$platformTag")
         val body = entries.joinToString(separator = "\n", prefix = "$header\n") { "• ${it.desc}" }
         dev.cannoli.ui.components.LaunchErrorDialog(
@@ -204,7 +227,7 @@ class LibretroActivity : ComponentActivity() {
         }
         if (!matched) return false
         val coreId = File(corePath).name.removeSuffix("_android.so")
-        val entries = dev.cannoli.scorza.scanner.CoreInfoRepository(assets).getFirmwareFor(coreId)
+        val entries = dev.cannoli.scorza.config.CoreInfoRepository(assets).getFirmwareFor(coreId)
         if (entries.isEmpty()) return false
         withContext(kotlinx.coroutines.Dispatchers.Main) {
             missingBios = entries
@@ -236,8 +259,12 @@ class LibretroActivity : ComponentActivity() {
         diskLabel(currentDiskIndex),
         raHasAchievements,
         guideFiles.isNotEmpty(),
+        hasReassign = nonExcludedConnectedCount() > 1,
         quitLabel = if (alwaysSaveOnQuit) getString(R.string.igm_save_and_quit) else "Quit"
     )
+
+    private fun nonExcludedConnectedCount(): Int =
+        portRouter.snapshotEntries().count { !it.mapping.excludeFromGameplay }
 
     private fun refreshDiskInfo() {
         if (!romPath.endsWith(".m3u", ignoreCase = true)) return
@@ -255,9 +282,59 @@ class LibretroActivity : ComponentActivity() {
 
     companion object {
         private val FF_SPEEDS = listOf(2, 3, 4, 6, 8)
+
+        // Substrings (lowercase) matched against "<key> <desc>" for cores declaring hw_render=true.
+        // These options only take effect with a hardware GL/Vulkan context, which the built-in
+        // runner does not provide, so we hide them rather than let users toggle no-ops.
+        private val HW_RENDER_GATED_PATTERNS = listOf(
+            "resolution",
+            "internal_res",
+            "upscal",
+            "msaa",
+            "multisamp",
+            "supersamp",
+            "antialias",
+            "anti_alias",
+            "anti-alias",
+            "anisotropic",
+            "widescreen_hack",
+            "widescreen hack",
+            "render_scal",
+            "render scal",
+            "texture_scaling",
+            "texture scaling",
+            "framebuffer scal",
+            "framebuffer_scal",
+            "pgxp",
+            "texture_filt",
+            "texture filter",
+            "bilinear",
+            "trilinear",
+        )
         private const val TRIGGER_PRESS_THRESHOLD = 0.5f
         private const val TRIGGER_RELEASE_THRESHOLD = 0.3f
         @Volatile var isRunning = false
+
+        // Last-resort keycode -> nav button mapping for IGM nav, used only when the device
+        // is not enrolled in v2 PortRouter (no DeviceMapping available).
+        private val NAV_FALLBACK_KEY_MAP = mapOf(
+            KeyEvent.KEYCODE_BUTTON_A to "btn_south",
+            KeyEvent.KEYCODE_BUTTON_B to "btn_east",
+            KeyEvent.KEYCODE_BUTTON_X to "btn_west",
+            KeyEvent.KEYCODE_BUTTON_Y to "btn_north",
+            KeyEvent.KEYCODE_BUTTON_L1 to "btn_l",
+            KeyEvent.KEYCODE_BUTTON_R1 to "btn_r",
+            KeyEvent.KEYCODE_BUTTON_L2 to "btn_l2",
+            KeyEvent.KEYCODE_BUTTON_R2 to "btn_r2",
+            KeyEvent.KEYCODE_BUTTON_THUMBL to "btn_l3",
+            KeyEvent.KEYCODE_BUTTON_THUMBR to "btn_r3",
+            KeyEvent.KEYCODE_BUTTON_START to "btn_start",
+            KeyEvent.KEYCODE_BUTTON_SELECT to "btn_select",
+            KeyEvent.KEYCODE_DPAD_UP to "btn_up",
+            KeyEvent.KEYCODE_DPAD_DOWN to "btn_down",
+            KeyEvent.KEYCODE_DPAD_LEFT to "btn_left",
+            KeyEvent.KEYCODE_DPAD_RIGHT to "btn_right",
+        )
     }
 
     private fun push(screen: IGMScreen) { screenStack.add(screen) }
@@ -273,21 +350,21 @@ class LibretroActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        gameTitle = (intent.getStringExtra("game_title") ?: "").removePrefix("$STAR ")
-        corePath = intent.getStringExtra("core_path") ?: run { finish(); return }
-        romPath = intent.getStringExtra("rom_path") ?: run { finish(); return }
-        originalRomPath = intent.getStringExtra("original_rom_path")
-        sramPath = intent.getStringExtra("sram_path") ?: ""
-        stateBasePath = intent.getStringExtra("state_path") ?: ""
-        systemDir = intent.getStringExtra("system_dir") ?: ""
-        saveDir = intent.getStringExtra("save_dir") ?: ""
-        platformTag = intent.getStringExtra("platform_tag") ?: ""
-        platformName = intent.getStringExtra("platform_name") ?: platformTag
-        cannoliRoot = intent.getStringExtra("cannoli_root") ?: ""
+        val args = dev.cannoli.scorza.launcher.LaunchArgs.from(intent) ?: run { finish(); return }
+        gameTitle = args.gameTitle.removePrefix("$STAR ")
+        corePath = args.corePath
+        romPath = args.romPath
+        originalRomPath = args.originalRomPath
+        sramPath = args.sramPath
+        stateBasePath = args.statePath
+        systemDir = args.systemDir
+        saveDir = args.saveDir
+        platformTag = args.platformTag
+        platformName = args.platformName
+        cannoliRoot = args.cannoliRoot
         val coreName = File(corePath).nameWithoutExtension
-        val debugLogging = intent.getBooleanExtra("debug_logging", false)
         sessionLog = SessionLog(
-            enabled = debugLogging,
+            enabled = dev.cannoli.scorza.util.LoggingPrefs.session,
             cannoliRoot = cannoliRoot,
             coreName = coreName,
             corePath = corePath,
@@ -309,10 +386,10 @@ class LibretroActivity : ComponentActivity() {
         es3Supported = reqGlEs >= 0x30000
         ShaderPipeline.es3Supported = es3Supported
         sessionLog.log("device GLES: 0x${Integer.toHexString(reqGlEs)} (${glEsMajor}.${glEsMinor}) es3Supported=$es3Supported")
-        val bootSettings = SettingsRepository(this)
-        confirmButton = bootSettings.confirmButton
-        buttonLabelSet = bootSettings.buttonLabelSet
+        confirmButton = activeMappingHolder.active.value.confirmButton()
+        buttonLabelSet = activeMappingHolder.active.value.labelSet(dev.cannoli.ui.ButtonLabelSet.PLUMBER)
         isRunning = true
+        wireBindingController()
         window.setBackgroundDrawableResource(android.R.color.black)
         goFullscreen()
         sessionLog.log("game_title=$gameTitle")
@@ -321,47 +398,32 @@ class LibretroActivity : ComponentActivity() {
         sessionLog.log("platform_tag=$platformTag")
         slotManager = SaveSlotManager(stateBasePath)
         guideManager = GuideManager(cannoliRoot, platformTag, File(romPath).nameWithoutExtension)
-        profileManager = ProfileManager(cannoliRoot)
-        profileManager.ensureDefaults()
-        defaultProfileControls = profileManager.readControls(ProfileManager.NAVIGATION)
-        autoconfigLoader = dev.cannoli.scorza.input.autoconfig.AutoconfigLoader(
-            dev.cannoli.scorza.input.autoconfig.AssetCfgSource(this)
-        )
-        autoconfigMatcher = dev.cannoli.scorza.input.autoconfig.AutoconfigMatcher(autoconfigLoader.entries())
-        controllerManager = ControllerManager()
-        controllerManager.loadBlacklist(this)
-        controllerManager.onDeviceDisconnected = { port -> onControllerDisconnected(port) }
-        controllerManager.onDeviceConnected = { port, _ ->
-            if (::runner.isInitialized) runner.setControllerPortDevice(port, LibretroRunner.DEVICE_JOYPAD)
-            onControllerReconnected(port)
-        }
-        controllerManager.initialize()
-        input = controllerManager.portInputs[0]
         runner = LibretroRunner()
-        val inputManager = getSystemService(Context.INPUT_SERVICE) as InputManager
-        inputManager.registerInputDeviceListener(controllerManager, Handler(Looper.getMainLooper()))
 
         val colors = CannoliColors(
-            highlight = hexToColor(intent.getStringExtra("color_highlight") ?: "#FFFFFF") ?: Color.White,
-            text = hexToColor(intent.getStringExtra("color_text") ?: "#FFFFFF") ?: Color.White,
-            highlightText = hexToColor(intent.getStringExtra("color_highlight_text") ?: "#000000") ?: Color.Black,
-            accent = hexToColor(intent.getStringExtra("color_accent") ?: "#FFFFFF") ?: Color.White,
-            title = hexToColor(intent.getStringExtra("color_title") ?: "#FFFFFF") ?: Color.White
+            highlight = hexToColor(args.colorHighlight) ?: Color.White,
+            text = hexToColor(args.colorText) ?: Color.White,
+            highlightText = hexToColor(args.colorHighlightText) ?: Color.Black,
+            accent = hexToColor(args.colorAccent) ?: Color.White,
+            title = hexToColor(args.colorTitle) ?: Color.White,
+            background = hexToColor(args.colorBackground) ?: Color.Black,
+            statusBar = hexToColor(args.colorStatusBar) ?: Color.White
         )
 
         val fontFamily = run {
-            val fontKey = intent.getStringExtra("font") ?: "default"
+            val fontKey = args.font
+            val appFonts = (application as dev.cannoli.scorza.CannoliApp).appFonts
             when (fontKey) {
-                "default" -> MPlus1Code
-                "the_og" -> BPReplay
+                "default" -> appFonts.mplus1Code
+                "the_og" -> appFonts.bpReplay
                 else -> {
-                    val fontFile = File(cannoliRoot, "Config/Fonts/$fontKey")
+                    val fontFile = File(dev.cannoli.scorza.config.CannoliPaths(cannoliRoot).configFonts, fontKey)
                     if (fontFile.exists()) {
                         try {
                             val typeface = android.graphics.Typeface.createFromFile(fontFile)
                             androidx.compose.ui.text.font.FontFamily(androidx.compose.ui.text.font.Typeface(typeface))
-                        } catch (_: Exception) { MPlus1Code }
-                    } else MPlus1Code
+                        } catch (_: Exception) { appFonts.mplus1Code }
+                    } else appFonts.mplus1Code
                 }
             }
         }
@@ -393,15 +455,13 @@ class LibretroActivity : ComponentActivity() {
                                 },
                                 settingsItems = if (screen is IGMScreen.Menu) emptyList() else buildSettingsItems(),
                                 coreInfo = coreInfoText,
-                                input = controllerManager.portInputs[0],
-                                profileName = currentProfileName,
-                                profileNames = profileNames,
                                 debugHud = debugHud,
                                 renderer = renderer,
                                 runner = runner,
                                 audioSampleRate = audioSampleRate,
-                                osdMessage = osdMessage,
+                                osdController = osdController,
                                 fastForwarding = fastForwarding,
+                                settings = settings,
                                 guideFiles = guideFiles,
                                 guidePageCount = guidePageCount,
                                 guideScrollDir = guideScrollDir,
@@ -421,8 +481,7 @@ class LibretroActivity : ComponentActivity() {
                                     rendererName = renderer.backendName,
                                     raStatus = raManager?.let { ra ->
                                         if (ra.isLoggedIn) {
-                                            val status = if (ra.isOnline) "Online" else "Offline"
-                                            "${ra.username} ($status)"
+                                            "${ra.username} (${ra.getStatus()})"
                                         } else null
                                     },
                                     raGameId = raManager?.let { ra ->
@@ -431,8 +490,19 @@ class LibretroActivity : ComponentActivity() {
                                             val title = ra.gameTitle
                                             if (title.isNotEmpty()) "$id — $title" else "$id"
                                         } else null
+                                    },
+                                    raDetection = raInfoTick.let { raManager?.takeIf { it.isLoggedIn }?.getDetectionStatus() }
+                                ),
+                                activeMapping = activeMappingHolder.active.collectAsState().value,
+                                controllersViewModel = controllersViewModel,
+                                mappingRepository = mappingRepository,
+                                editButtonsController = editButtonsController,
+                                onClearListening = {
+                                    val cs = currentScreen
+                                    if (cs is IGMScreen.EditButtons) {
+                                        replaceTop(cs.copy(listeningCanonical = null))
                                     }
-                                )
+                                },
                             )
                             if (!revealed) {
                                 Box(modifier = Modifier.fillMaxSize().background(Color.Black))
@@ -448,11 +518,11 @@ class LibretroActivity : ComponentActivity() {
                 if (missingBios.isNotEmpty()) { finish(); return }
                 if (loading) return
                 if (screenStack.isEmpty()) openMenu() else pop()
-                if (screenStack.isEmpty()) { renderer.paused = false; runner.resumeAudio(); startVsyncPacer() }
+                if (screenStack.isEmpty()) { stopRaPausedIdle(); renderer.paused = false; runner.resumeAudio(); startVsyncPacer() }
             }
         })
 
-        val resumeSlot = intent.getIntExtra("resume_slot", -1)
+        val resumeSlot = args.resumeSlot
         val activity = this
         lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             sessionLog.log("loadCore: $corePath")
@@ -467,6 +537,10 @@ class LibretroActivity : ComponentActivity() {
             }
             runner.init(systemDir, saveDir)
             sessionLog.log("runner.init completed")
+            val coreInfoRepoForHw = dev.cannoli.scorza.config.CoreInfoRepository(assets)
+            val coreIdForHw = File(corePath).name.removeSuffix("_android.so")
+            coreRequiresHwRender = coreInfoRepoForHw.requiresHwRender(coreIdForHw)
+            if (coreRequiresHwRender) sessionLog.log("core declares hw_render=true; hiding GPU-scaling options")
             val coreBaseName = File(corePath).nameWithoutExtension
             gameBaseName = if (romPath.isNotEmpty()) File(romPath).nameWithoutExtension else ""
             overrideManager = OverrideManager(cannoliRoot, platformTag, gameBaseName, coreBaseName)
@@ -507,33 +581,21 @@ class LibretroActivity : ComponentActivity() {
             withContext(kotlinx.coroutines.Dispatchers.Main) {
                 val (coreName, coreVersion) = runner.getSystemInfo()
                 coreInfoText = if (coreVersion.isNotEmpty()) "$coreName $coreVersion" else coreName
-                coreOptions = runner.getCoreOptions()
+                coreOptions = loadVisibleCoreOptions()
                 coreCategories = runner.getCoreCategories()
 
                 loadOverrides()
                 controllerTypes = runner.getControllerTypes(0).filter { it.id != 0 }
-                val savedTypeId = overrideManager.load(profileManager).controllerTypeId
-                val savedIdx = if (savedTypeId >= 0) controllerTypes.indexOfFirst { it.id == savedTypeId } else -1
-                if (savedIdx >= 0) {
-                    controllerTypeIndex = savedIdx
-                    applyForceAnalog(savedTypeId > 1)
-                    for (p in 0 until LibretroRunner.MAX_PORTS) {
-                        if (controllerManager.slots[p] != null) runner.setControllerPortDevice(p, savedTypeId)
-                    }
-                } else {
-                    for (p in 0 until LibretroRunner.MAX_PORTS) {
-                        if (controllerManager.slots[p] != null) runner.setControllerPortDevice(p, LibretroRunner.DEVICE_JOYPAD)
-                    }
-                }
+                applyPortDeviceTypes()
                 scanOverlayImages()
                 copyBundledShaders()
                 scanShaderPresets()
 
                 audioSampleRate = avInfo.sampleRate
                 sessionLog.log("audio init: requested sampleRate=${avInfo.sampleRate}")
-                runner.initAudio(avInfo.sampleRate)
+                runner.initAudio(avInfo.sampleRate, avInfo.fps)
                 runner.setAudioMuted(true)
-                if (debugLogging) {
+                if (dev.cannoli.scorza.util.LoggingPrefs.session) {
                     sessionLog.log("audio ${runner.getAudioDiagnostics()}")
                     audioStatsHandler.postDelayed(audioStatsRunnable, 5000)
                 }
@@ -541,7 +603,6 @@ class LibretroActivity : ComponentActivity() {
                 val shaderCacheDir = File(cacheDir, "shader_cache")
                 ShaderPipeline.cacheDir = shaderCacheDir
 
-                val globalSettings = SettingsRepository(activity)
                 fun configureBackend(backend: LibretroRenderer) {
                     backend.coreAspectRatio = runner.getAspectRatio()
                     backend.scalingMode = scalingMode
@@ -550,12 +611,12 @@ class LibretroActivity : ComponentActivity() {
                     backend.debugHud = debugHud
                     backend.overlayPath = resolveOverlayPath()
                     backend.shaderPresetPath = resolveShaderPresetPath()
-                    backend.portraitMarginPx = globalSettings.portraitMarginPx
+                    backend.portraitMarginPx = settings.portraitMarginPx
                 }
 
                 val glesBackend = LibretroRenderer(runner)
                 glesBackend.coreTargetFps = avInfo.fps
-                if (debugLogging) {
+                if (dev.cannoli.scorza.util.LoggingPrefs.session) {
                     glesBackend.logger = { msg -> sessionLog.log(msg) }
                     ShaderPipeline.logger = { msg -> sessionLog.log(msg) }
                 }
@@ -585,7 +646,7 @@ class LibretroActivity : ComponentActivity() {
                 renderer = glesBackend
                 pushShaderParamsToRenderer()
 
-                val eglLog: (String) -> Unit = { msg -> if (debugLogging) sessionLog.log(msg) }
+                val eglLog: (String) -> Unit = { msg -> if (dev.cannoli.scorza.util.LoggingPrefs.session) sessionLog.log(msg) }
                 val glVersion = if (es3Supported) 3 else 2
                 glSurfaceView = GLSurfaceView(activity).apply {
                     setEGLContextClientVersion(glVersion)
@@ -597,6 +658,29 @@ class LibretroActivity : ComponentActivity() {
                         override fun onViewAttachedToWindow(v: android.view.View) { eglLog("GLSurfaceView attached to window") }
                         override fun onViewDetachedFromWindow(v: android.view.View) { eglLog("GLSurfaceView detached from window") }
                     })
+                    val requestedFps = avInfo.fps.toFloat()
+                    holder.addCallback(object : android.view.SurfaceHolder.Callback {
+                        override fun surfaceCreated(h: android.view.SurfaceHolder) {
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                                try {
+                                    h.surface.setFrameRate(
+                                        requestedFps,
+                                        android.view.Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE
+                                    )
+                                    val achieved = activity.display?.refreshRate ?: -1f
+                                    sessionLog.log("setFrameRate requested=$requestedFps achieved=$achieved")
+                                } catch (t: Throwable) {
+                                    sessionLog.log("setFrameRate threw: ${t.message}")
+                                }
+                            }
+                            val displayHz = activity.display?.refreshRate ?: 60f
+                            val mismatch = kotlin.math.abs(displayHz - requestedFps) / requestedFps
+                            glesBackend.lockedToVsync = mismatch < 0.02f
+                            sessionLog.log("vsync lock: displayHz=$displayHz coreFps=$requestedFps mismatch=${"%.4f".format(mismatch)} locked=${glesBackend.lockedToVsync}")
+                        }
+                        override fun surfaceChanged(h: android.view.SurfaceHolder, format: Int, width: Int, height: Int) {}
+                        override fun surfaceDestroyed(h: android.view.SurfaceHolder) {}
+                    })
                 }
                 gameView = glSurfaceView
                 startVsyncPacer()
@@ -605,13 +689,13 @@ class LibretroActivity : ComponentActivity() {
                 loading = false
                 sessionLog.log("render loop starting")
 
-                val raUser = intent.getStringExtra("ra_username") ?: ""
-                val raToken = intent.getStringExtra("ra_token") ?: ""
-                val raPassword = intent.getStringExtra("ra_password") ?: ""
+                val raUser = args.raUsername
+                val raToken = args.raToken
+                val raPassword = args.raPassword
                 val consoleId = RetroAchievementsManager.CONSOLE_MAP[platformTag.uppercase()]
                 sessionLog.log("RA init: user=${raUser.isNotEmpty()} token=${raToken.isNotEmpty()} password=${raPassword.isNotEmpty()} consoleId=$consoleId platformTag=$platformTag")
                 if (consoleId != null && raUser.isNotEmpty() && (raToken.isNotEmpty() || raPassword.isNotEmpty())) {
-                    val raGameIdOverride = intent.getIntExtra("ra_game_id", 0)
+                    val raGameIdOverride = args.raGameId ?: 0
                     var tokenRetryAttempted = false
                     lateinit var ra: RetroAchievementsManager
                     ra = RetroAchievementsManager(
@@ -619,17 +703,17 @@ class LibretroActivity : ComponentActivity() {
                         cacheDir = java.io.File(cacheDir, "ra_cache"),
                         onEvent = { _, title, _, _ ->
                             raHasAchievements = true
-                            showOsd("\uDB81\uDD38 $title")
+                            showOsd("\uDB81\uDD38 $title", OsdPosition.BottomCenter)
                         },
                         onLogin = { success, nameOrError, newToken ->
                             sessionLog.log("RA onLogin: success=$success name=$nameOrError tokenReceived=${newToken != null}")
                             if (success && newToken != null) {
                                 if (tokenRetryAttempted) {
-                                    val repo = SettingsRepository(activity)
-                                    repo.raToken = newToken
-                                    repo.flush()
+                                    settings.raToken = newToken
+                                    settings.flush()
                                     sessionLog.log("RA token refreshed via password retry")
                                 }
+                                scheduleRaStartupOsd(nameOrError)
                             } else if (!tokenRetryAttempted && raPassword.isNotEmpty()) {
                                 tokenRetryAttempted = true
                                 sessionLog.log("RA token login failed, retrying with password")
@@ -637,16 +721,16 @@ class LibretroActivity : ComponentActivity() {
                             } else {
                                 sessionLog.logError("RA login failed: $nameOrError")
                                 if (ra.isOnline) {
-                                    val repo = SettingsRepository(activity)
-                                    repo.raToken = ""
-                                    repo.raPassword = ""
-                                    repo.flush()
+                                    settings.raToken = ""
+                                    settings.raPassword = ""
+                                    settings.flush()
                                     sessionLog.log("RA credentials cleared -- user must re-authenticate")
                                 }
-                                showOsd(getString(R.string.ra_login_failed))
+                                showOsd(getString(R.string.ra_login_failed), OsdPosition.TopCenter)
                             }
                         },
-                        onSyncStatus = { msg -> showOsd(msg) },
+                        onSyncStatus = { msg -> showOsd(msg, OsdPosition.TopStart) },
+                        onDetectionReady = { onRaDetectionReady() },
                         logger = { msg -> sessionLog.log(msg) }
                     )
                     ra.init()
@@ -690,15 +774,12 @@ class LibretroActivity : ComponentActivity() {
 
     // --- Input ---
 
-    private val axisMask = LibretroInput.RETRO_UP or LibretroInput.RETRO_DOWN or
-            LibretroInput.RETRO_LEFT or LibretroInput.RETRO_RIGHT or
-            LibretroInput.RETRO_L2 or LibretroInput.RETRO_R2
-
     private var menuHeldKey = 0
 
     private val triggerL2HeldDevices = mutableSetOf<Int>()
     private val triggerR2HeldDevices = mutableSetOf<Int>()
     private val portConsumedKeys = Array(LibretroRunner.MAX_PORTS) { mutableSetOf<Int>() }
+    private val portPressedKeys = Array(LibretroRunner.MAX_PORTS) { mutableSetOf<Int>() }
     private val menuRepeatHandler = Handler(Looper.getMainLooper())
     private val menuRepeatDelay = 400L
     private val menuRepeatInterval = 80L
@@ -745,6 +826,13 @@ class LibretroActivity : ComponentActivity() {
     }
 
     override fun dispatchGenericMotionEvent(event: android.view.MotionEvent): Boolean {
+        val csForListen = currentScreen
+        if (csForListen is IGMScreen.EditButtons && editButtonsController.isListening) {
+            val axes = listOf(0, 1, 11, 14, 15, 16, 17, 18, 22, 23)
+            val axisValues = axes.associateWith { event.getAxisValue(it) }
+            editButtonsController.captureRawAxisEvent(axisValues)
+            return true
+        }
         if (loading) return super.dispatchGenericMotionEvent(event)
         val source = event.source
         val isJoystick = source and android.view.InputDevice.SOURCE_JOYSTICK == android.view.InputDevice.SOURCE_JOYSTICK ||
@@ -755,54 +843,127 @@ class LibretroActivity : ComponentActivity() {
             return true
         }
 
-        val port = controllerManager.getPortForDeviceId(event.deviceId) ?: 0
-        val portInput = controllerManager.portInputs[port]
-        var axes = 0
+        val port = portRouter.portFor(event.deviceId) ?: 0
+        val mapping = portRouter.mappingForPort(port)
+        val evaluator = evaluatorForPort(port)
 
-        val hatX = event.getAxisValue(android.view.MotionEvent.AXIS_HAT_X)
-        val hatY = event.getAxisValue(android.view.MotionEvent.AXIS_HAT_Y)
-        if (hatX < -0.5f) axes = axes or (portInput.keyCodeToRetroMask(KeyEvent.KEYCODE_DPAD_LEFT) ?: LibretroInput.RETRO_LEFT)
-        if (hatX > 0.5f) axes = axes or (portInput.keyCodeToRetroMask(KeyEvent.KEYCODE_DPAD_RIGHT) ?: LibretroInput.RETRO_RIGHT)
-        if (hatY < -0.5f) axes = axes or (portInput.keyCodeToRetroMask(KeyEvent.KEYCODE_DPAD_UP) ?: LibretroInput.RETRO_UP)
-        if (hatY > 0.5f) axes = axes or (portInput.keyCodeToRetroMask(KeyEvent.KEYCODE_DPAD_DOWN) ?: LibretroInput.RETRO_DOWN)
-
-        val stickX = event.getAxisValue(android.view.MotionEvent.AXIS_X)
-        val stickY = event.getAxisValue(android.view.MotionEvent.AXIS_Y)
-        val analogMode = controllerTypes.getOrNull(controllerTypeIndex)?.let { it.id > 1 } == true
-        if (!analogMode) {
-            if (stickX < -0.5f) axes = axes or (portInput.keyCodeToRetroMask(KeyEvent.KEYCODE_DPAD_LEFT) ?: LibretroInput.RETRO_LEFT)
-            if (stickX > 0.5f) axes = axes or (portInput.keyCodeToRetroMask(KeyEvent.KEYCODE_DPAD_RIGHT) ?: LibretroInput.RETRO_RIGHT)
-            if (stickY < -0.5f) axes = axes or (portInput.keyCodeToRetroMask(KeyEvent.KEYCODE_DPAD_UP) ?: LibretroInput.RETRO_UP)
-            if (stickY > 0.5f) axes = axes or (portInput.keyCodeToRetroMask(KeyEvent.KEYCODE_DPAD_DOWN) ?: LibretroInput.RETRO_DOWN)
+        if (evaluator != null) {
+            val axisValues = collectMotionAxes(mapping, event)
+            evaluator.evaluateAxis(axisValues)
+            pushPortMask(port)
         }
 
         val leftTrigger = maxOf(
-            event.getAxisValue(android.view.MotionEvent.AXIS_LTRIGGER),
-            event.getAxisValue(android.view.MotionEvent.AXIS_BRAKE),
+            mappingTriggerValue(mapping, dev.cannoli.scorza.input.v2.CanonicalButton.BTN_L2, event) ?: 0f,
+            event.getAxisValue(android.view.MotionEvent.AXIS_LTRIGGER).coerceIn(0f, 1f),
+            event.getAxisValue(android.view.MotionEvent.AXIS_BRAKE).coerceIn(0f, 1f),
         )
         val rightTrigger = maxOf(
-            event.getAxisValue(android.view.MotionEvent.AXIS_RTRIGGER),
-            event.getAxisValue(android.view.MotionEvent.AXIS_GAS),
+            mappingTriggerValue(mapping, dev.cannoli.scorza.input.v2.CanonicalButton.BTN_R2, event) ?: 0f,
+            event.getAxisValue(android.view.MotionEvent.AXIS_RTRIGGER).coerceIn(0f, 1f),
+            event.getAxisValue(android.view.MotionEvent.AXIS_GAS).coerceIn(0f, 1f),
         )
-        if (leftTrigger > 0.5f) axes = axes or LibretroInput.RETRO_L2
-        if (rightTrigger > 0.5f) axes = axes or LibretroInput.RETRO_R2
-
         syncSyntheticTrigger(event.deviceId, port, KeyEvent.KEYCODE_BUTTON_L2, leftTrigger, triggerL2HeldDevices)
         syncSyntheticTrigger(event.deviceId, port, KeyEvent.KEYCODE_BUTTON_R2, rightTrigger, triggerR2HeldDevices)
 
-        controllerManager.portInputMasks[port] = (controllerManager.portInputMasks[port] and axisMask.inv()) or axes
-        runner.setInput(port, controllerManager.portInputMasks[port])
-
-        runner.setAnalog(port, 0, (stickX * 32767).toInt().coerceIn(-32768, 32767),
-            (stickY * 32767).toInt().coerceIn(-32768, 32767))
-        val rStickX = event.getAxisValue(android.view.MotionEvent.AXIS_Z)
-        val rStickY = event.getAxisValue(android.view.MotionEvent.AXIS_RZ)
+        val stickX = event.getAxisValue(android.view.MotionEvent.AXIS_X)
+        val stickY = event.getAxisValue(android.view.MotionEvent.AXIS_Y)
+        val lStickX = mostActiveStick(mappingStickValue(mapping, dev.cannoli.scorza.input.v2.AnalogRole.LEFT_STICK_X, event), stickX)
+        val lStickY = mostActiveStick(mappingStickValue(mapping, dev.cannoli.scorza.input.v2.AnalogRole.LEFT_STICK_Y, event), stickY)
+        runner.setAnalog(port, 0, (lStickX * 32767).toInt().coerceIn(-32768, 32767),
+            (lStickY * 32767).toInt().coerceIn(-32768, 32767))
+        val rStickX = mostActiveStick(
+            mappingStickValue(mapping, dev.cannoli.scorza.input.v2.AnalogRole.RIGHT_STICK_X, event),
+            event.getAxisValue(android.view.MotionEvent.AXIS_Z),
+        )
+        val rStickY = mostActiveStick(
+            mappingStickValue(mapping, dev.cannoli.scorza.input.v2.AnalogRole.RIGHT_STICK_Y, event),
+            event.getAxisValue(android.view.MotionEvent.AXIS_RZ),
+        )
         runner.setAnalog(port, 1, (rStickX * 32767).toInt().coerceIn(-32768, 32767),
             (rStickY * 32767).toInt().coerceIn(-32768, 32767))
         return true
     }
 
+    private fun evaluatorForPort(port: Int): dev.cannoli.scorza.input.v2.runtime.PortEvaluator? {
+        val snap = portRouter.snapshotEntries().firstOrNull { it.port == port } ?: return null
+        return portRouter.evaluatorFor(snap.androidDeviceId)
+    }
+
+    private fun pushPortMask(port: Int) {
+        val eval = evaluatorForPort(port) ?: run {
+            runner.setInput(port, 0)
+            return
+        }
+        var mask = 0
+        for (cb in eval.currentlyPressed()) {
+            mask = mask or dev.cannoli.scorza.input.v2.runtime.CanonicalRetroMap.maskOf(cb)
+        }
+        runner.setInput(port, mask)
+    }
+
+    private fun collectMotionAxes(
+        mapping: dev.cannoli.scorza.input.v2.DeviceMapping?,
+        event: android.view.MotionEvent,
+    ): Map<Int, Float> {
+        val axes = mutableSetOf<Int>()
+        if (mapping != null) {
+            for ((_, bindings) in mapping.bindings) {
+                for (binding in bindings) {
+                    when (binding) {
+                        is dev.cannoli.scorza.input.v2.InputBinding.Axis -> axes.add(binding.axis)
+                        is dev.cannoli.scorza.input.v2.InputBinding.Hat -> axes.add(binding.axis)
+                        is dev.cannoli.scorza.input.v2.InputBinding.Button -> Unit
+                    }
+                }
+            }
+        }
+        return axes.associateWith { event.getAxisValue(it) }
+    }
+
+    private fun mostActiveStick(mapping: Float?, fallback: Float): Float {
+        if (mapping == null) return fallback
+        return if (kotlin.math.abs(mapping) >= kotlin.math.abs(fallback)) mapping else fallback
+    }
+
+    private fun mappingTriggerValue(
+        mapping: dev.cannoli.scorza.input.v2.DeviceMapping?,
+        canonical: dev.cannoli.scorza.input.v2.CanonicalButton,
+        event: android.view.MotionEvent,
+    ): Float? {
+        val axisBinding = mapping?.bindings?.get(canonical)
+            ?.firstNotNullOfOrNull { it as? dev.cannoli.scorza.input.v2.InputBinding.Axis }
+            ?.takeIf { it.analogRole == dev.cannoli.scorza.input.v2.AnalogRole.DIGITAL_BUTTON }
+            ?: return null
+        return axisBinding.normalize(event.getAxisValue(axisBinding.axis))
+    }
+
+    private fun mappingStickValue(
+        mapping: dev.cannoli.scorza.input.v2.DeviceMapping?,
+        role: dev.cannoli.scorza.input.v2.AnalogRole,
+        event: android.view.MotionEvent,
+    ): Float? {
+        val axisBinding = mapping?.bindings?.values
+            ?.flatten()
+            ?.firstNotNullOfOrNull {
+                (it as? dev.cannoli.scorza.input.v2.InputBinding.Axis)?.takeIf { axis -> axis.analogRole == role }
+            }
+            ?: return null
+        val raw = event.getAxisValue(axisBinding.axis)
+        val span = axisBinding.activeMax - axisBinding.restingValue
+        if (span == 0f) return 0f
+        val ratio = (raw - axisBinding.restingValue) / span
+        val signed = (ratio * 2f - 1f).coerceIn(-1f, 1f)
+        return if (axisBinding.invert) -signed else signed
+    }
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val cs = currentScreen
+        if (cs is IGMScreen.EditButtons && editButtonsController.isListening
+            && event.action == KeyEvent.ACTION_DOWN) {
+            editButtonsController.captureRawKeyEvent(event.keyCode)
+            return true
+        }
         when (event.keyCode) {
             KeyEvent.KEYCODE_VOLUME_UP,
             KeyEvent.KEYCODE_VOLUME_DOWN,
@@ -833,13 +994,13 @@ class LibretroActivity : ComponentActivity() {
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (missingBios.isNotEmpty()) {
-            if (resolveNavButton(keyCode) == "btn_east") finish()
+            if (resolveNavButton(keyCode, event.deviceId) == "btn_east") finish()
             return true
         }
         if (loading) return true
         if (isSystemMediaKey(keyCode)) return super.onKeyDown(keyCode, event)
         val screen = currentScreen ?: return handleGameplayInput(keyCode, event)
-        val button = resolveNavButton(keyCode)
+        val button = resolveNavButton(keyCode, event.deviceId)
         return when (screen) {
             is IGMScreen.Menu -> handleMenuInput(screen, button)
             is IGMScreen.Settings -> handleCategoryInput(screen, button)
@@ -848,9 +1009,6 @@ class LibretroActivity : ComponentActivity() {
             is IGMScreen.ShaderSettings -> handleShaderSettingsInput(screen, button)
             is IGMScreen.Emulator -> handleEmulatorInput(screen, button)
             is IGMScreen.EmulatorCategory -> handleEmulatorCategoryInput(screen, button)
-            is IGMScreen.Controls -> handleProfilePickerInput(screen, button)
-            is IGMScreen.ControlEdit -> handleControlEditInput(screen, keyCode, button)
-            is IGMScreen.ProfileName -> handleProfileNameInput(screen, button)
             is IGMScreen.Shortcuts -> handleShortcutsInput(screen, keyCode, button)
             is IGMScreen.SavePrompt -> handleSavePromptInput(screen, button)
             is IGMScreen.Info -> {
@@ -865,6 +1023,10 @@ class LibretroActivity : ComponentActivity() {
             is IGMScreen.AchievementDetail -> handleAchievementDetailInput(screen, button)
             is IGMScreen.GuidePicker -> handleGuidePickerInput(screen, button)
             is IGMScreen.Guide -> handleGuideInput(screen, button)
+            is IGMScreen.Controllers -> handleControllersInput(screen, button)
+            is IGMScreen.ControllerDetail -> handleControllerDetailInput(screen, button)
+            is IGMScreen.EditButtons -> handleEditButtonsInput(screen, keyCode, button)
+            is IGMScreen.ReassignPlayers -> handleReassignPlayersInput(screen, button)
         }
     }
 
@@ -873,36 +1035,22 @@ class LibretroActivity : ComponentActivity() {
         if (isSystemMediaKey(keyCode)) return super.onKeyUp(keyCode, event)
         if (screenStack.isNotEmpty()) {
             val cs = currentScreen
-            if (cs is IGMScreen.ProfileName && resolveNavButton(keyCode) == "btn_select") {
-                shortcutCountdownHandler.removeCallbacks(keyboardSelectHoldRunnable)
-                if (!keyboardSelectHeld) {
-                    if (cs.symbols) {
-                        replaceTop(cs.copy(caps = keyboardCapsBeforeSymbols, symbols = false))
-                    } else {
-                        replaceTop(cs.copy(caps = !cs.caps))
-                    }
-                }
-                keyboardSelectDown = false
-                keyboardSelectHeld = false
-                return true
-            }
             if (cs is IGMScreen.Guide) {
-                when (resolveNavButton(keyCode)) {
+                when (resolveNavButton(keyCode, event.deviceId)) {
                     "btn_up", "btn_down" -> guideScrollDir = 0
                     "btn_left", "btn_right" -> guideScrollXDir = 0
                 }
             }
             if (cs is IGMScreen.Info) {
-                when (resolveNavButton(keyCode)) {
+                when (resolveNavButton(keyCode, event.deviceId)) {
                     "btn_up", "btn_down" -> infoScrollDir = 0
                 }
             }
-            handleShortcutKeyUp(keyCode)
+            bindingController.keyUp(keyCode)
             return true
         }
-        val port = controllerManager.getPortForDeviceId(event.deviceId) ?: 0
-        if (isSyntheticTriggerHeld(event.deviceId, keyCode)) return true
-        val portKeys = controllerManager.portPressedKeys[port]
+        val port = portRouter.portFor(event.deviceId) ?: 0
+        val portKeys = portPressedKeys[port]
         portKeys.remove(keyCode)
         portConsumedKeys[port].remove(keyCode)
 
@@ -914,10 +1062,13 @@ class LibretroActivity : ComponentActivity() {
             }
         }
 
-        val portInput = controllerManager.portInputs[port]
-        val mask = portInput.keyCodeToRetroMask(keyCode) ?: return super.onKeyUp(keyCode, event)
-        controllerManager.portInputMasks[port] = controllerManager.portInputMasks[port] and mask.inv()
-        runner.setInput(port, controllerManager.portInputMasks[port])
+        // The evaluator's Button asserter for this keycode releases here; if an Axis
+        // asserter is still tracking the canonical, BTN_* stays in currentlyPressed via
+        // that source and the libretro mask doesn't drop until the axis comes back to rest.
+        val evaluator = evaluatorForPort(port) ?: return super.onKeyUp(keyCode, event)
+        if (!evaluator.keyCodeIsBound(keyCode)) return super.onKeyUp(keyCode, event)
+        evaluator.evaluateKeyUp(keyCode)
+        pushPortMask(port)
         return true
     }
 
@@ -934,12 +1085,18 @@ class LibretroActivity : ComponentActivity() {
         else -> false
     }
 
-    private fun resolveNavButton(keyCode: Int): String? {
+    private fun resolveNavButton(keyCode: Int, deviceId: Int): String? {
         when (keyCode) {
             KeyEvent.KEYCODE_BACK -> return "btn_east"
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> return "btn_south"
         }
-        val pref = navInputHandler.resolveButton(keyCode) ?: return null
+        val mapping = portRouter.mappingFor(deviceId) ?: activeMappingHolder.active.value
+        val canonical = mapping?.bindings?.entries?.firstOrNull { (_, bindings) ->
+            bindings.any { it is dev.cannoli.scorza.input.v2.InputBinding.Button && it.keyCode == keyCode }
+        }?.key
+        val pref = canonical?.let { canonicalToNavName(it) }
+            ?: NAV_FALLBACK_KEY_MAP[keyCode]
+            ?: return null
         return if (confirmButton == dev.cannoli.ui.ConfirmButton.EAST) {
             when (pref) {
                 "btn_south" -> "btn_east"
@@ -949,11 +1106,26 @@ class LibretroActivity : ComponentActivity() {
         } else pref
     }
 
-    private fun isSyntheticTriggerHeld(deviceId: Int, keyCode: Int): Boolean = when (keyCode) {
-        KeyEvent.KEYCODE_BUTTON_L2 -> deviceId in triggerL2HeldDevices
-        KeyEvent.KEYCODE_BUTTON_R2 -> deviceId in triggerR2HeldDevices
-        else -> false
+    private fun canonicalToNavName(c: dev.cannoli.scorza.input.v2.CanonicalButton): String = when (c) {
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_SOUTH -> "btn_south"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_EAST -> "btn_east"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_WEST -> "btn_west"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_NORTH -> "btn_north"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_UP -> "btn_up"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_DOWN -> "btn_down"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_LEFT -> "btn_left"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_RIGHT -> "btn_right"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_L -> "btn_l"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_R -> "btn_r"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_L2 -> "btn_l2"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_R2 -> "btn_r2"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_L3 -> "btn_l3"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_R3 -> "btn_r3"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_START -> "btn_start"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_SELECT -> "btn_select"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_MENU -> "btn_menu"
     }
+
 
     private fun syncSyntheticTrigger(
         deviceId: Int,
@@ -965,11 +1137,11 @@ class LibretroActivity : ComponentActivity() {
         val wasHeld = deviceId in held
         if (value > TRIGGER_PRESS_THRESHOLD && !wasHeld) {
             held.add(deviceId)
-            val portKeys = controllerManager.portPressedKeys[port]
+            val portKeys = portPressedKeys[port]
             if (portKeys.add(keyCode)) checkShortcuts(port)
         } else if (value < TRIGGER_RELEASE_THRESHOLD && wasHeld) {
             held.remove(deviceId)
-            val portKeys = controllerManager.portPressedKeys[port]
+            val portKeys = portPressedKeys[port]
             portKeys.remove(keyCode)
             portConsumedKeys[port].remove(keyCode)
             if (holdingFf) {
@@ -983,27 +1155,30 @@ class LibretroActivity : ComponentActivity() {
     }
 
     private fun handleGameplayInput(keyCode: Int, event: KeyEvent): Boolean {
-        val menuCode = defaultProfileControls["btn_menu"] ?: KeyEvent.KEYCODE_BACK
-        val port = controllerManager.getPortForDeviceId(event.deviceId) ?: 0
-        val portInput = controllerManager.portInputs[port]
-        val mappedMask = portInput.keyCodeToRetroMask(keyCode)
-        val isMenuKey = keyCode == KeyEvent.KEYCODE_MENU ||
-                keyCode == KeyEvent.KEYCODE_BACK ||
-                keyCode == menuCode
-        if (isMenuKey && mappedMask == null) { openMenu(); return true }
-        if (isSyntheticTriggerHeld(event.deviceId, keyCode)) return true
-        val portKeys = controllerManager.portPressedKeys[port]
+        val port = portRouter.portFor(event.deviceId) ?: 0
+        val evaluator = evaluatorForPort(port)
+        val mapping = portRouter.mappingForPort(port)
+        val mapsToCanonical = evaluator?.keyCodeIsBound(keyCode) == true
+        val opensMenu = mapping?.bindings?.get(dev.cannoli.scorza.input.v2.CanonicalButton.BTN_MENU)
+            ?.any { it is dev.cannoli.scorza.input.v2.InputBinding.Button && it.keyCode == keyCode } == true
+        if (opensMenu) { openMenu(); return true }
+        // Don't early-return on synthetic-trigger held: portPressedKeys.add already dedupes for
+        // chord detection, and on devices whose trigger axis rests at 0 the mapping importer
+        // normalizes it to 0.5 -- past the press threshold but never below the release
+        // threshold, so triggerR2HeldDevices stays populated forever and a real button press
+        // would silently no-op.
+        val portKeys = portPressedKeys[port]
         val isNewPress = portKeys.add(keyCode)
         if (isNewPress) checkShortcuts(port)
         if (keyCode in portConsumedKeys[port]) return true
-        val mask = mappedMask ?: return super.onKeyDown(keyCode, event)
-        controllerManager.portInputMasks[port] = controllerManager.portInputMasks[port] or mask
-        runner.setInput(port, controllerManager.portInputMasks[port])
+        if (evaluator == null || !mapsToCanonical) return super.onKeyDown(keyCode, event)
+        evaluator.evaluateKeyDown(keyCode, event.repeatCount > 0)
+        pushPortMask(port)
         return true
     }
 
     private fun checkShortcuts(port: Int) {
-        val portKeys = controllerManager.portPressedKeys[port]
+        val portKeys = portPressedKeys[port]
         val consumed = portConsumedKeys[port]
         for ((action, chord) in shortcuts) {
             if (chord.isEmpty() || !portKeys.containsAll(chord)) continue
@@ -1012,14 +1187,14 @@ class LibretroActivity : ComponentActivity() {
                 ShortcutAction.SAVE_STATE -> {
                     if (stateBasePath.isNotEmpty()) {
                         slotManager.saveState(runner, currentSlot)
-                        showOsd("Saved to ${currentSlot.label}")
+                        showOsd("Saved to ${currentSlot.label}", OsdPosition.BottomCenter)
                     }
                 }
                 ShortcutAction.LOAD_STATE -> {
                     if (stateBasePath.isNotEmpty() && slotManager.stateExists(currentSlot)) {
                         slotManager.loadState(runner, currentSlot)
                         sessionLog.log("RA state load (shortcut): slot=${currentSlot.label}")
-                        showOsd("Loaded ${currentSlot.label}")
+                        showOsd("Loaded ${currentSlot.label}", OsdPosition.BottomCenter)
                     }
                 }
                 ShortcutAction.RESET_GAME -> {
@@ -1030,7 +1205,7 @@ class LibretroActivity : ComponentActivity() {
                         startUndoTimer(30_000)
                     }
                     runner.reset()
-                    showOsd("Reset")
+                    showOsd("Reset", OsdPosition.BottomCenter)
                 }
                 ShortcutAction.SAVE_AND_QUIT -> {
                     renderer.paused = true
@@ -1042,12 +1217,12 @@ class LibretroActivity : ComponentActivity() {
                     val modes = ScalingMode.entries
                     scalingMode = modes[(scalingMode.ordinal + 1) % modes.size]
                     renderer.scalingMode = scalingMode
-                    showOsd("Scaling: ${scalingLabel()}")
+                    showOsd("Scaling: ${scalingLabel()}", OsdPosition.BottomCenter)
                 }
                 ShortcutAction.CYCLE_EFFECT -> {
                     cycleShader(1)
                     val label = if (shaderPreset.isEmpty()) "Off" else File(shaderPreset).nameWithoutExtension
-                    showOsd("Shader: $label")
+                    showOsd("Shader: $label", OsdPosition.BottomCenter)
                 }
                 ShortcutAction.TOGGLE_FF -> {
                     setFastForward(!fastForwarding)
@@ -1065,6 +1240,7 @@ class LibretroActivity : ComponentActivity() {
                         renderer.paused = true
                         runner.pauseAudio()
                         stopVsyncPacer()
+                        startRaPausedIdle()
                         screenStack.clear()
                         guideFiles = guides
                         if (guides.size == 1) openGuide(guides[0])
@@ -1073,13 +1249,11 @@ class LibretroActivity : ComponentActivity() {
                 }
             }
             consumed.addAll(chord)
-            var inputMask = controllerManager.portInputMasks[port]
-            val portInput = controllerManager.portInputs[port]
-            for (key in chord) {
-                portInput.keyCodeToRetroMask(key)?.let { inputMask = inputMask and it.inv() }
+            val evaluator = evaluatorForPort(port)
+            if (evaluator != null) {
+                for (key in chord) evaluator.evaluateKeyUp(key)
             }
-            controllerManager.portInputMasks[port] = inputMask
-            runner.setInput(port, inputMask)
+            pushPortMask(port)
             break
         }
     }
@@ -1087,6 +1261,7 @@ class LibretroActivity : ComponentActivity() {
     // --- Menu screen ---
 
     private fun openMenu() {
+        raManager?.idle()
         if (!raHasAchievements) {
             raManager?.let { ra -> raHasAchievements = ra.isLoggedIn && ra.getAchievements().isNotEmpty() }
         }
@@ -1096,6 +1271,7 @@ class LibretroActivity : ComponentActivity() {
         renderer.paused = true
         runner.pauseAudio()
         stopVsyncPacer()
+        startRaPausedIdle()
         refreshSlotInfo()
         refreshDiskInfo()
     }
@@ -1104,8 +1280,7 @@ class LibretroActivity : ComponentActivity() {
         screenStack.clear()
         menuRepeatHandler.removeCallbacks(menuRepeatRunnable)
         menuHeldKey = 0
-        applyProfileToAllPorts(profileManager.readControls(currentProfileName))
-        controllerManager.resetAllInput()
+        for (set in portPressedKeys) set.clear()
         triggerL2HeldDevices.clear()
         triggerR2HeldDevices.clear()
         for (set in portConsumedKeys) set.clear()
@@ -1114,21 +1289,10 @@ class LibretroActivity : ComponentActivity() {
             setFastForward(false)
         }
         for (p in 0 until LibretroRunner.MAX_PORTS) runner.setInput(p, 0)
+        stopRaPausedIdle()
         renderer.paused = false
         runner.resumeAudio()
         startVsyncPacer()
-    }
-
-    private fun onControllerDisconnected(port: Int) {
-        if (loading) return
-        runner.setInput(port, 0)
-        runner.setControllerPortDevice(port, LibretroRunner.DEVICE_NONE)
-        showOsd("Player ${port + 1} Disconnected")
-    }
-
-    private fun onControllerReconnected(port: Int) {
-        runner.setControllerPortDevice(port, LibretroRunner.DEVICE_JOYPAD)
-        if (!loading) showOsd("Player ${port + 1} connected")
     }
 
     private fun refreshSlotInfo() {
@@ -1148,7 +1312,7 @@ class LibretroActivity : ComponentActivity() {
         val newIndex = ((currentDiskIndex + direction) + diskCount) % diskCount
         if (newIndex != currentDiskIndex && runner.setDiskIndex(newIndex)) {
             currentDiskIndex = newIndex
-            showOsd("Switched to ${diskLabel(currentDiskIndex)}")
+            showOsd("Switched to ${diskLabel(currentDiskIndex)}", OsdPosition.BottomCenter)
         }
     }
 
@@ -1158,7 +1322,7 @@ class LibretroActivity : ComponentActivity() {
                 "btn_north" -> {
                     slotManager.deleteState(currentSlot)
                     refreshSlotInfo()
-                    showOsd("Deleted ${currentSlot.label}")
+                    showOsd("Deleted ${currentSlot.label}", OsdPosition.BottomCenter)
                     replaceTop(screen.copy(confirmDeleteSlot = false))
                     true
                 }
@@ -1230,7 +1394,7 @@ class LibretroActivity : ComponentActivity() {
                     }
                     slotManager.saveState(runner, slot)
                     refreshSlotInfo()
-                    showOsd("Saved to ${slot.label}")
+                    showOsd("Saved to ${slot.label}", OsdPosition.BottomCenter)
                 }
                 closeAll()
             }
@@ -1243,7 +1407,7 @@ class LibretroActivity : ComponentActivity() {
                     startUndoTimer()
                     slotManager.loadState(runner, slot)
                     sessionLog.log("RA state load (IGM): slot=${slot.label}")
-                    showOsd("Loaded ${slot.label}")
+                    showOsd("Loaded ${slot.label}", OsdPosition.BottomCenter)
                 }
                 closeAll()
             }
@@ -1255,11 +1419,14 @@ class LibretroActivity : ComponentActivity() {
                 }
             }
             menu.settingsIndex -> {
-                coreOptions = runner.getCoreOptions()
+                coreOptions = loadVisibleCoreOptions()
                 refreshShaderParams()
                 frontendSnapshot = buildCurrentSettings()
                 shaderParamsDirty = false
                 push(IGMScreen.Settings())
+            }
+            menu.reassignIndex -> {
+                push(IGMScreen.ReassignPlayers())
             }
             menu.resetIndex -> {
                 if (stateBasePath.isNotEmpty()) {
@@ -1271,6 +1438,7 @@ class LibretroActivity : ComponentActivity() {
                 runner.reset()
                 sessionLog.log("RA reset (IGM game reset)")
                 raManager?.reset()
+                showOsd("Reset", OsdPosition.BottomCenter)
                 closeAll()
             }
             menu.achievementsIndex -> {
@@ -1315,12 +1483,12 @@ class LibretroActivity : ComponentActivity() {
                 when (screen.selectedIndex) {
                     IGMSettings.VIDEO -> push(IGMScreen.Video())
                     IGMSettings.EMULATOR -> {
-                        coreOptions = runner.getCoreOptions()
+                        coreOptions = loadVisibleCoreOptions()
                         coreCategories = runner.getCoreCategories()
                         push(IGMScreen.Emulator())
                     }
-                    IGMSettings.CONTROLS -> {
-                        push(IGMScreen.Controls(selectedIndex = profileNames.indexOf(currentProfileName).coerceAtLeast(0)))
+                    IGMSettings.CONTROLLERS -> {
+                        push(IGMScreen.Controllers())
                     }
                     IGMSettings.SHORTCUTS -> push(IGMScreen.Shortcuts())
                     IGMSettings.ADVANCED -> push(IGMScreen.Advanced())
@@ -1359,10 +1527,10 @@ class LibretroActivity : ComponentActivity() {
     private fun overlayLabel() = if (overlay.isEmpty()) "None" else File(overlay).nameWithoutExtension
 
     private fun resolveOverlayPath(): String? =
-        if (overlay.isEmpty()) null else File(cannoliRoot, "Overlays/$platformTag/$overlay").absolutePath
+        if (overlay.isEmpty()) null else File(dev.cannoli.scorza.config.CannoliPaths(cannoliRoot).overlaysFor(platformTag), overlay).absolutePath
 
     private fun scanOverlayImages() {
-        val dir = File(cannoliRoot, "Overlays/$platformTag")
+        val dir = dev.cannoli.scorza.config.CannoliPaths(cannoliRoot).overlaysFor(platformTag)
         val exts = setOf("png", "jpg", "jpeg")
         overlayImages = dir.listFiles()
             ?.filter { it.isFile && it.extension.lowercase(java.util.Locale.ROOT) in exts }
@@ -1372,7 +1540,7 @@ class LibretroActivity : ComponentActivity() {
     }
 
     private fun copyBundledShaders() {
-        val destDir = File(cannoliRoot, "Shaders")
+        val destDir = dev.cannoli.scorza.config.CannoliPaths(cannoliRoot).shadersDir
         val versionFile = File(destDir, ".bundled_version")
         val currentVersion = try {
             packageManager.getPackageInfo(packageName, 0).longVersionCode.toString()
@@ -1412,7 +1580,7 @@ class LibretroActivity : ComponentActivity() {
     }
 
     private fun scanShaderPresets() {
-        val dir = File(cannoliRoot, "Shaders")
+        val dir = dev.cannoli.scorza.config.CannoliPaths(cannoliRoot).shadersDir
         val exts = setOf("glslp")
         shaderPresets = dir.walk()
             .filter { it.isFile && it.extension.lowercase(java.util.Locale.ROOT) in exts }
@@ -1424,7 +1592,7 @@ class LibretroActivity : ComponentActivity() {
 
     private fun resolveShaderPresetPath(): String? =
         if (shaderPreset.isEmpty()) null
-        else File(cannoliRoot, "Shaders/$shaderPreset").absolutePath
+        else File(dev.cannoli.scorza.config.CannoliPaths(cannoliRoot).shadersDir, shaderPreset).absolutePath
 
     private fun refreshShaderParams() {
         val path = resolveShaderPresetPath()
@@ -1529,20 +1697,42 @@ class LibretroActivity : ComponentActivity() {
         }
     }
 
+    private fun occupiedPorts(): List<Int> = portRouter.snapshotEntries()
+        .filter { it.port != null && !it.mapping.excludeFromGameplay }
+        .mapNotNull { it.port }
+        .sorted()
+
+    private fun deviceTypeLabel(port: Int): String {
+        val typeId = portDeviceTypes[port] ?: LibretroRunner.DEVICE_JOYPAD
+        return controllerTypes.firstOrNull { it.id == typeId }?.desc ?: "Standard"
+    }
+
+    private fun cyclePortDeviceType(port: Int, direction: Int) {
+        if (controllerTypes.isEmpty()) return
+        val currentTypeId = portDeviceTypes[port] ?: LibretroRunner.DEVICE_JOYPAD
+        val currentIdx = controllerTypes.indexOfFirst { it.id == currentTypeId }.coerceAtLeast(0)
+        val newIdx = ((currentIdx + direction) + controllerTypes.size) % controllerTypes.size
+        val ct = controllerTypes[newIdx]
+        portDeviceTypes = portDeviceTypes.toMutableMap().also { it[port] = ct.id }
+        if (port == 0) {
+            controllerTypeIndex = newIdx
+            applyForceAnalog(ct.id > 1)
+        }
+        runner.setControllerPortDevice(port, ct.id)
+    }
+
     private fun cycleAdvancedValue(index: Int, direction: Int) {
-        val offset = if (controllerTypes.size > 1) 1 else 0
-        when (index) {
-            0 -> if (offset == 1) {
-                val newIdx = ((controllerTypeIndex + direction) + controllerTypes.size) % controllerTypes.size
-                controllerTypeIndex = newIdx
-                val ct = controllerTypes[newIdx]
-                applyForceAnalog(ct.id > 1)
-                runner.setControllerPortDevice(0, ct.id)
-            } else {
-                cycleFfSpeed(direction)
-            }
-            offset -> { cycleFfSpeed(direction) }
-            offset + 1 -> { debugHud = !debugHud; renderer.debugHud = debugHud }
+        val portRows = if (controllerTypes.size > 1) {
+            val ports = occupiedPorts()
+            if (ports.size <= 1) listOf(0) else ports
+        } else emptyList()
+        if (index < portRows.size) {
+            cyclePortDeviceType(portRows[index], direction)
+            return
+        }
+        when (index - portRows.size) {
+            0 -> cycleFfSpeed(direction)
+            1 -> { debugHud = !debugHud; renderer.debugHud = debugHud }
         }
     }
 
@@ -1553,7 +1743,7 @@ class LibretroActivity : ComponentActivity() {
         }?.key ?: return
         val value = if (enable) "true" else "false"
         runner.setCoreOption(key, value)
-        coreOptions = runner.getCoreOptions()
+        coreOptions = loadVisibleCoreOptions()
     }
 
     private fun cycleShader(direction: Int) {
@@ -1592,7 +1782,7 @@ class LibretroActivity : ComponentActivity() {
     private fun handleAchievementsInput(screen: IGMScreen.Achievements, button: String?): Boolean {
         val filtered = filteredAchievements(screen)
         val count = filtered.size
-        if (count == 0 && button != "btn_north") return when (button) {
+        if (count == 0 && button != "btn_north" && button != "btn_west") return when (button) {
             "btn_east" -> { pop(); true }
             else -> true
         }
@@ -1860,311 +2050,62 @@ class LibretroActivity : ComponentActivity() {
         }
     }
 
+    private fun loadVisibleCoreOptions(): List<LibretroRunner.CoreOption> {
+        val all = runner.getCoreOptions()
+        if (!coreRequiresHwRender) return all
+        return all.filterNot { isHwRenderGatedOption(it) }
+    }
+
+    private fun isHwRenderGatedOption(opt: LibretroRunner.CoreOption): Boolean {
+        val haystack = (opt.key + " " + opt.desc).lowercase()
+        return HW_RENDER_GATED_PATTERNS.any { it in haystack }
+    }
+
     private fun cycleEmulatorValue(options: List<LibretroRunner.CoreOption>, index: Int, direction: Int) {
         val opt = options.getOrNull(index) ?: return
         if (opt.values.isEmpty()) return
         val curIdx = opt.values.indexOfFirst { it.value == opt.selected }.coerceAtLeast(0)
         val newVal = opt.values[(curIdx + direction + opt.values.size) % opt.values.size]
         runner.setCoreOption(opt.key, newVal.value)
-        coreOptions = runner.getCoreOptions()
+        coreOptions = loadVisibleCoreOptions()
     }
 
-    // --- Controls ---
 
-    private val controlListenTimeoutMs = 3000
-    private val controlListenTickMs = 100L
-
-    private val controlListenRunnable = object : Runnable {
-        override fun run() {
-            val screen = currentScreen as? IGMScreen.ControlEdit ?: return
-            if (screen.listeningIndex < 0) return
-            val newMs = screen.listenCountdownMs + controlListenTickMs.toInt()
-            if (newMs >= controlListenTimeoutMs) {
-                replaceTop(screen.copy(listeningIndex = -1, listenCountdownMs = 0))
-            } else {
-                replaceTop(screen.copy(listenCountdownMs = newMs))
-                shortcutCountdownHandler.postDelayed(this, controlListenTickMs)
-            }
-        }
-    }
-
-    private fun handleProfilePickerInput(screen: IGMScreen.Controls, button: String?): Boolean {
-        if (screen.menuOpen) {
-            return when (button) {
-                "btn_up" -> { replaceTop(screen.copy(menuIndex = if (screen.menuIndex <= 0) 1 else 0)); true }
-                "btn_down" -> { replaceTop(screen.copy(menuIndex = if (screen.menuIndex >= 1) 0 else 1)); true }
-                "btn_south" -> {
-                    val name = profileNames.getOrNull(screen.selectedIndex) ?: return true
-                    when (screen.menuIndex) {
-                        0 -> {
-                            replaceTop(screen.copy(menuOpen = false))
-                            push(IGMScreen.ProfileName(name = name, cursorPos = name.length, isNew = false, originalName = name))
-                        }
-                        1 -> {
-                            profileManager.deleteProfile(name)
-                            profileNames = profileManager.listGameProfiles()
-                            if (currentProfileName == name) {
-                                currentProfileName = ProfileManager.DEFAULT_GAME
-                                profileManager.saveProfileSelection(platformTag, gameBaseName, currentProfileName)
-                            }
-                            replaceTop(IGMScreen.Controls(selectedIndex = screen.selectedIndex.coerceAtMost(profileNames.lastIndex)))
-                        }
-                    }
-                    true
-                }
-                else -> { replaceTop(screen.copy(menuOpen = false)); true }
-            }
-        }
-        val count = profileNames.size
-        return when (button) {
-            "btn_up" -> {
-                if (count > 0) replaceTop(screen.copy(selectedIndex = ((screen.selectedIndex - 1) + count) % count)); true
-            }
-            "btn_down" -> {
-                if (count > 0) replaceTop(screen.copy(selectedIndex = (screen.selectedIndex + 1) % count)); true
-            }
-            "btn_south" -> {
-                val name = profileNames.getOrNull(screen.selectedIndex) ?: return true
-                currentProfileName = name
-                profileManager.saveProfileSelection(platformTag, gameBaseName, name)
-                replaceTop(screen)
-                true
-            }
-            "btn_west" -> {
-                push(IGMScreen.ProfileName(isNew = true))
-                true
-            }
-            "btn_north" -> {
-                val name = profileNames.getOrNull(screen.selectedIndex) ?: return true
-                currentProfileName = name
-                profileManager.saveProfileSelection(platformTag, gameBaseName, name)
-                applyProfileToAllPorts(profileManager.readControls(name))
-                push(IGMScreen.ControlEdit())
-                true
-            }
-            "btn_start" -> {
-                val name = profileNames.getOrNull(screen.selectedIndex)
-                if (name != null && !ProfileManager.isProtected(name)) {
-                    replaceTop(screen.copy(menuOpen = true, menuIndex = 0))
-                }
-                true
-            }
-            "btn_east" -> { pop(); true }
-            else -> true
-        }
-    }
-
-    private fun handleControlEditInput(screen: IGMScreen.ControlEdit, rawKeyCode: Int, button: String?): Boolean {
-        val inp = controllerManager.portInputs[0]
-        if (screen.listeningIndex >= 0) {
-            shortcutCountdownHandler.removeCallbacks(controlListenRunnable)
-            inp.assign(inp.buttons[screen.listeningIndex], rawKeyCode)
-            saveCurrentProfile()
-            replaceTop(screen.copy(listeningIndex = -1, listenCountdownMs = 0))
-            return true
-        }
-        val count = inp.buttons.size
-        return when (button) {
-            "btn_up" -> {
-                replaceTop(screen.copy(selectedIndex = ((screen.selectedIndex - 1) + count) % count)); true
-            }
-            "btn_down" -> {
-                replaceTop(screen.copy(selectedIndex = (screen.selectedIndex + 1) % count)); true
-            }
-            "btn_south" -> {
-                replaceTop(screen.copy(listeningIndex = screen.selectedIndex, listenCountdownMs = 0))
-                shortcutCountdownHandler.postDelayed(controlListenRunnable, controlListenTickMs)
-                true
-            }
-            "btn_north" -> {
-                if (screen.listeningIndex < 0) {
-                    val btn = inp.buttons.getOrNull(screen.selectedIndex)
-                    if (btn != null && btn.prefKey != "btn_menu" && inp.getKeyCodeFor(btn) != LibretroInput.UNMAPPED) {
-                        inp.unmap(btn)
-                        saveCurrentProfile()
-                        replaceTop(screen.copy(revision = screen.revision + 1))
-                    }
-                }
-                true
-            }
-            "btn_east" -> { pop(); true }
-            else -> true
-        }
-    }
-
-    private fun handleProfileNameInput(screen: IGMScreen.ProfileName, button: String?): Boolean {
-        val rows = dev.cannoli.ui.components.getKeyboardRows(screen.caps, screen.symbols)
-        val maxRow = rows.lastIndex
-        val maxCol = rows[screen.keyRow.coerceIn(0, maxRow)].lastIndex
-        return when (button) {
-            "btn_up" -> {
-                val newRow = if (screen.keyRow <= 0) maxRow else screen.keyRow - 1
-                replaceTop(screen.copy(keyRow = newRow, keyCol = screen.keyCol.coerceAtMost(rows[newRow].lastIndex))); true
-            }
-            "btn_down" -> {
-                val newRow = if (screen.keyRow >= maxRow) 0 else screen.keyRow + 1
-                replaceTop(screen.copy(keyRow = newRow, keyCol = screen.keyCol.coerceAtMost(rows[newRow].lastIndex))); true
-            }
-            "btn_left" -> {
-                replaceTop(screen.copy(keyCol = if (screen.keyCol <= 0) maxCol else screen.keyCol - 1)); true
-            }
-            "btn_right" -> {
-                replaceTop(screen.copy(keyCol = if (screen.keyCol >= maxCol) 0 else screen.keyCol + 1)); true
-            }
-            "btn_south" -> {
-                dev.cannoli.ui.components.handleKeyboardConfirm(
-                    screen.caps, screen.symbols, screen.keyRow, screen.keyCol,
-                    screen.name, screen.cursorPos,
-                    onChar = { newName, newPos -> replaceTop(screen.copy(name = newName, cursorPos = newPos)) },
-                    onShift = { replaceTop(screen.copy(caps = !screen.caps)) },
-                    onSymbols = { replaceTop(screen.copy(symbols = !screen.symbols)) },
-                    onEnter = { finishProfileName(screen) }
-                )
-                true
-            }
-            "btn_l" -> {
-                if (screen.cursorPos > 0) replaceTop(screen.copy(cursorPos = screen.cursorPos - 1)); true
-            }
-            "btn_r" -> {
-                if (screen.cursorPos < screen.name.length) replaceTop(screen.copy(cursorPos = screen.cursorPos + 1)); true
-            }
-            "btn_north" -> {
-                val newName = screen.name.substring(0, screen.cursorPos) + " " + screen.name.substring(screen.cursorPos)
-                replaceTop(screen.copy(name = newName, cursorPos = screen.cursorPos + 1))
-                true
-            }
-            "btn_east" -> {
-                if (screen.cursorPos > 0) {
-                    val newName = screen.name.removeRange(screen.cursorPos - 1, screen.cursorPos)
-                    replaceTop(screen.copy(name = newName, cursorPos = screen.cursorPos - 1))
-                }
-                true
-            }
-            "btn_select" -> {
-                if (!keyboardSelectDown) {
-                    keyboardSelectDown = true
-                    keyboardSelectHeld = false
-                    shortcutCountdownHandler.removeCallbacks(keyboardSelectHoldRunnable)
-                    shortcutCountdownHandler.postDelayed(keyboardSelectHoldRunnable, 400)
-                }
-                true
-            }
-            "btn_start" -> { finishProfileName(screen); true }
-            "btn_west" -> { pop(); true }
-            else -> true
-        }
-    }
-
-    private fun finishProfileName(screen: IGMScreen.ProfileName) {
-        val name = screen.name.trim()
-        if (name.isBlank() || ProfileManager.isProtected(name)) { pop(); return }
-        if (screen.isNew) {
-            val identity = controllerManager.slots[0]
-            val device = controllerManager.getDeviceIdForPort(0)?.let { android.view.InputDevice.getDevice(it) }
-            val verifier: (IntArray) -> BooleanArray = if (device != null) {
-                { codes -> device.hasKeys(*codes) }
-            } else {
-                { codes -> BooleanArray(codes.size) { true } }
-            }
-            val match = identity?.let { profileManager.autoProfileControlsFor(it, autoconfigMatcher, verifier) }
-            val controls = if (match != null) {
-                match.controls
-            } else {
-                val inp = controllerManager.portInputs[0]
-                buildMap { for (btn in inp.buttons) put(btn.prefKey, inp.getKeyCodeFor(btn)) }
-            }
-            if (!profileManager.createProfile(name, controls)) { pop(); return }
-            if (match != null) showOsd("Prefilled with ${match.deviceName}")
-        } else {
-            val file = java.io.File(cannoliRoot, "Config/Profiles/${screen.originalName}.ini")
-            val dest = java.io.File(cannoliRoot, "Config/Profiles/$name.ini")
-            if (dest.exists() && name != screen.originalName) { pop(); return }
-            file.renameTo(dest)
-            if (currentProfileName == screen.originalName) currentProfileName = name
-        }
-        profileNames = profileManager.listGameProfiles()
-        pop()
-        val controlsScreen = screenStack.lastOrNull() as? IGMScreen.Controls
-        if (controlsScreen != null) {
-            replaceTop(controlsScreen.copy(selectedIndex = profileNames.indexOf(name).coerceAtLeast(0)))
-        }
-    }
-
-    private fun saveCurrentProfile() {
-        val inp = controllerManager.portInputs[0]
-        val controlMap = mutableMapOf<String, Int>()
-        for (btn in inp.buttons) controlMap[btn.prefKey] = inp.getKeyCodeFor(btn)
-        profileManager.saveControls(currentProfileName, controlMap)
-        applyProfileToAllPorts(controlMap)
-    }
-
-    private fun applyProfileToAllPorts(controls: Map<String, Int>) {
-        controllerManager.resetAllInput()
-        for (p in 0 until LibretroRunner.MAX_PORTS) {
-            runner.setInput(p, 0)
-            val portInput = controllerManager.portInputs[p]
-            portInput.resetDefaults()
-            for ((key, keyCode) in controls) {
-                val btn = portInput.buttons.find { it.prefKey == key } ?: continue
-                portInput.assign(btn, keyCode)
-            }
-        }
-    }
 
 
     // --- Shortcuts ---
 
-    private val shortcutCountdownHandler = Handler(Looper.getMainLooper())
-    private val shortcutHoldMs = 1500
-    private val shortcutTickMs = 100L
-
-    private var keyboardSelectDown = false
-    private var keyboardSelectHeld = false
-    private var keyboardCapsBeforeSymbols = false
-    private val keyboardSelectHoldRunnable = Runnable {
-        val s = currentScreen as? IGMScreen.ProfileName ?: return@Runnable
-        keyboardSelectHeld = true
-        if (!s.symbols) keyboardCapsBeforeSymbols = s.caps
-        replaceTop(s.copy(caps = false, symbols = !s.symbols))
-    }
-
-    private val shortcutCountdownRunnable = object : Runnable {
-        override fun run() {
-            val screen = currentScreen as? IGMScreen.Shortcuts ?: return
-            if (!screen.listening) return
-            val newMs = screen.countdownMs + shortcutTickMs.toInt()
-            if (newMs >= shortcutHoldMs) {
-                val action = ShortcutAction.entries[screen.selectedIndex - 1]
-                val chord = screen.heldKeys
-                val cleared = shortcuts.filterValues { it != chord }
-                shortcuts = cleared + (action to chord)
-                saveCurrentShortcuts()
-                replaceTop(screen.copy(listening = false, heldKeys = emptySet(), countdownMs = 0))
-            } else {
-                replaceTop(screen.copy(countdownMs = newMs))
-                shortcutCountdownHandler.postDelayed(this, shortcutTickMs)
+    private fun wireBindingController() {
+        bindingController.onProgress = { keys, elapsedMs ->
+            val cs = currentScreen
+            if (cs is IGMScreen.Shortcuts) {
+                replaceTop(cs.copy(heldKeys = keys, countdownMs = elapsedMs))
+            }
+        }
+        bindingController.onCommit = { chord ->
+            val cs = currentScreen
+            if (cs is IGMScreen.Shortcuts) {
+                // selectedIndex 0 is the source picker; actions start at 1.
+                val action = ShortcutAction.entries.getOrNull(cs.selectedIndex - 1)
+                if (action != null) {
+                    val cleared = shortcuts.filterValues { it != chord }
+                    shortcuts = cleared + (action to chord)
+                    saveCurrentShortcuts()
+                    replaceTop(cs.copy(listening = false, heldKeys = emptySet(), countdownMs = 0))
+                }
+            }
+        }
+        bindingController.onCancel = {
+            val cs = currentScreen
+            if (cs is IGMScreen.Shortcuts && cs.listening) {
+                replaceTop(cs.copy(listening = false, heldKeys = emptySet(), countdownMs = 0))
             }
         }
     }
 
-    private fun cancelShortcutListening() {
-        shortcutCountdownHandler.removeCallbacks(shortcutCountdownRunnable)
-        val screen = currentScreen as? IGMScreen.Shortcuts ?: return
-        if (screen.listening) replaceTop(screen.copy(listening = false, heldKeys = emptySet(), countdownMs = 0))
-    }
-
-    private fun handleShortcutKeyUp(keyCode: Int) {
-        val screen = currentScreen as? IGMScreen.Shortcuts ?: return
-        if (screen.listening && screen.heldKeys.contains(keyCode)) cancelShortcutListening()
-    }
-
     private fun handleShortcutsInput(screen: IGMScreen.Shortcuts, rawKeyCode: Int, button: String?): Boolean {
         if (screen.listening) {
-            if (screen.heldKeys.contains(rawKeyCode)) return true
-            val newKeys = screen.heldKeys + rawKeyCode
-            replaceTop(screen.copy(heldKeys = newKeys, countdownMs = 0))
-            shortcutCountdownHandler.removeCallbacks(shortcutCountdownRunnable)
-            shortcutCountdownHandler.postDelayed(shortcutCountdownRunnable, shortcutTickMs)
+            bindingController.keyDown(rawKeyCode)
             return true
         }
         val count = ShortcutAction.entries.size + 1
@@ -2184,10 +2125,9 @@ class LibretroActivity : ComponentActivity() {
                 true
             }
             "btn_south" -> {
-                if (screen.selectedIndex == 0) {
-                    cycleShortcutSource(1)
-                } else {
+                if (screen.selectedIndex > 0) {
                     replaceTop(screen.copy(listening = true, heldKeys = emptySet(), countdownMs = 0))
+                    bindingController.startListening()
                 }
                 true
             }
@@ -2229,8 +2169,8 @@ class LibretroActivity : ComponentActivity() {
             }
             "btn_south" -> {
                 when (screen.selectedIndex) {
-                    0 -> { saveToPlatform(); showOsd("Saved for $platformName") }
-                    1 -> { saveToGame(); showOsd("Saved for this game") }
+                    0 -> { saveToPlatform(); showOsd("Saved for $platformName", OsdPosition.BottomCenter) }
+                    1 -> { saveToGame(); showOsd("Saved for this game", OsdPosition.BottomCenter) }
                 }
                 frontendSnapshot = null
                 shaderParamsDirty = false
@@ -2261,8 +2201,14 @@ class LibretroActivity : ComponentActivity() {
             add(IGMSettingsItem("Overlay", overlayLabel()))
         }
         is IGMScreen.Advanced -> buildList {
-            if (controllerTypes.size > 1)
-                add(IGMSettingsItem("Controller Type", controllerTypes.getOrNull(controllerTypeIndex)?.desc ?: "Standard"))
+            if (controllerTypes.size > 1) {
+                val ports = occupiedPorts()
+                if (ports.size <= 1) {
+                    add(IGMSettingsItem("Controller Type", deviceTypeLabel(0)))
+                } else {
+                    for (p in ports) add(IGMSettingsItem("P${p + 1} Controller", deviceTypeLabel(p)))
+                }
+            }
             add(IGMSettingsItem("Max FF Speed", "${maxFfSpeed}x"))
             add(IGMSettingsItem("Debug HUD", if (debugHud) "On" else "Off"))
         }
@@ -2300,7 +2246,7 @@ class LibretroActivity : ComponentActivity() {
             for (action in ShortcutAction.entries) {
                 val chord = shortcuts[action]
                 val label = if (chord.isNullOrEmpty()) "None"
-                else chord.joinToString(" + ") { LibretroInput.keyCodeName(it) }
+                else chord.joinToString(" + ") { dev.cannoli.scorza.util.keyCodeName(it) }
                 add(IGMSettingsItem(getString(action.labelRes), label))
             }
         }
@@ -2327,9 +2273,9 @@ class LibretroActivity : ComponentActivity() {
             maxFfSpeed = maxFfSpeed,
             shaderPreset = shaderPreset,
             overlay = overlay,
-            controllerTypeId = controllerTypes.getOrNull(controllerTypeIndex)?.id ?: -1,
             coreOptions = optionMap,
-            shaderParams = paramMap
+            shaderParams = paramMap,
+            portDeviceTypes = portDeviceTypes,
         )
     }
 
@@ -2352,7 +2298,7 @@ class LibretroActivity : ComponentActivity() {
     }
 
     private fun loadOverrides() {
-        val settings = overrideManager.load(profileManager)
+        val settings = overrideManager.load()
         scalingMode = settings.scalingMode
         screenEffect = settings.screenEffect
         sharpness = settings.sharpness
@@ -2360,22 +2306,28 @@ class LibretroActivity : ComponentActivity() {
         maxFfSpeed = settings.maxFfSpeed
         shaderPreset = settings.shaderPreset
         overlay = settings.overlay
-        currentProfileName = settings.profileName
-        profileNames = profileManager.listGameProfiles()
         shortcutSource = settings.shortcutSource
         shortcuts = settings.shortcuts
-
-        applyProfileToAllPorts(settings.controls)
-        defaultProfileControls = profileManager.readControls(ProfileManager.NAVIGATION)
+        portDeviceTypes = settings.portDeviceTypes
 
         for ((key, value) in settings.coreOptions) {
             runner.setCoreOption(key, value)
         }
-        coreOptions = runner.getCoreOptions()
+        coreOptions = loadVisibleCoreOptions()
         shaderParams = emptyList()
         refreshShaderParams()
         applySavedShaderParams(settings.shaderParams)
         platformBaseline = overrideManager.loadPlatformBaseline()
+    }
+
+    private fun applyPortDeviceTypes() {
+        val entries = portRouter.snapshotEntries()
+        val occupied = entries.filter { !it.mapping.excludeFromGameplay }.map { it.port }.toSet()
+        for (p in 0 until LibretroRunner.MAX_PORTS) {
+            if (p !in occupied) continue
+            val typeId = portDeviceTypes[p] ?: LibretroRunner.DEVICE_JOYPAD
+            runner.setControllerPortDevice(p, typeId)
+        }
     }
 
     private fun prepareVerticalModeReinit(): Pair<() -> Unit, () -> Unit>? {
@@ -2394,10 +2346,63 @@ class LibretroActivity : ComponentActivity() {
 
     // --- OSD / Undo ---
 
-    private fun showOsd(message: String) {
-        osdHandler.removeCallbacks(clearOsdRunnable)
-        osdMessage = message
-        osdHandler.postDelayed(clearOsdRunnable, 3000)
+    private fun showOsd(message: String, position: OsdPosition = OsdPosition.TopCenter) {
+        osdController.show(message, position)
+    }
+
+    private val raStartupHandler = Handler(Looper.getMainLooper())
+    private var raStartupTimeout: Runnable? = null
+    private var raStartupDisplayName: String? = null
+
+    private fun scheduleRaStartupOsd(displayName: String) {
+        raStartupTimeout?.let { raStartupHandler.removeCallbacks(it) }
+        raStartupDisplayName = displayName
+        val ra = raManager
+        if (ra != null && ra.isMemoryInitialized && ra.gameId > 0 && ra.getAchievements().isNotEmpty()) {
+            onRaDetectionReady()
+            return
+        }
+        val timeout = Runnable {
+            if (raStartupDisplayName != null) {
+                showOsd(raTimeoutOsdText(), OsdPosition.TopCenter)
+                raStartupDisplayName = null
+                raStartupTimeout = null
+            }
+        }
+        raStartupTimeout = timeout
+        raStartupHandler.postDelayed(timeout, 5000L)
+    }
+
+    private fun raTimeoutOsdText(): String {
+        val ra = raManager ?: return getString(R.string.ra_init_failed)
+        return when {
+            ra.isOffline && ra.gameId <= 0 -> getString(R.string.ra_load_offline_pending)
+            ra.gameId <= 0 -> getString(R.string.ra_load_not_recognized)
+            ra.getAchievements().isEmpty() -> getString(R.string.ra_load_no_achievements)
+            else -> getString(R.string.ra_init_failed)
+        }
+    }
+
+    private fun onRaDetectionReady() {
+        val name = raStartupDisplayName ?: return
+        raStartupTimeout?.let { raStartupHandler.removeCallbacks(it) }
+        raStartupTimeout = null
+        raStartupDisplayName = null
+        val ra = raManager
+        if (ra == null || ra.gameId <= 0) {
+            showOsd(getString(R.string.ra_load_not_recognized), OsdPosition.TopCenter)
+            return
+        }
+        val achievements = ra.getAchievements()
+        if (achievements.isEmpty()) {
+            showOsd(getString(R.string.ra_load_no_achievements), OsdPosition.TopCenter)
+            return
+        }
+        val unlocked = achievements.count { it.unlocked }
+        showOsd(
+            getString(R.string.ra_login_success, name, ra.getStatus(), unlocked, achievements.size),
+            OsdPosition.TopStart
+        )
     }
 
     private fun startUndoTimer(durationMs: Long = 60_000) {
@@ -2418,7 +2423,7 @@ class LibretroActivity : ComponentActivity() {
         }
         clearUndo()
         refreshSlotInfo()
-        showOsd(label)
+        showOsd(label, OsdPosition.BottomCenter)
         closeAll()
     }
 
@@ -2453,7 +2458,7 @@ class LibretroActivity : ComponentActivity() {
 
     private fun quit() {
         isRunning = false
-        if (cannoliRoot.isNotEmpty()) File(cannoliRoot, "Config/State/quick_resume.txt").delete()
+        if (cannoliRoot.isNotEmpty()) dev.cannoli.scorza.config.CannoliPaths(cannoliRoot).quickResumeFile.delete()
         cleanup()
         finish()
     }
@@ -2465,6 +2470,10 @@ class LibretroActivity : ComponentActivity() {
         stopVsyncPacer()
         glSurfaceView?.onPause()
         if (!loading && !cleaned && sramPath.isNotEmpty()) { File(sramPath).parentFile?.mkdirs(); runner.saveSRAM(sramPath) }
+        if (::controllerV2Bridge.isInitialized) {
+            controllerV2Bridge.onDeviceAdded = null
+            controllerV2Bridge.onDeviceRemoved = null
+        }
     }
 
     override fun onStop() {
@@ -2479,7 +2488,7 @@ class LibretroActivity : ComponentActivity() {
             // }
             autoSavedOnStop = true
             if (cannoliRoot.isNotEmpty() && romPath.isNotEmpty()) {
-                val f = File(cannoliRoot, "Config/State/quick_resume.txt")
+                val f = dev.cannoli.scorza.config.CannoliPaths(cannoliRoot).quickResumeFile
                 f.parentFile?.mkdirs()
                 f.writeText("$romPath\n$platformTag")
             }
@@ -2490,8 +2499,30 @@ class LibretroActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume(); overridePendingTransition(0, 0); glSurfaceView?.onResume(); startVsyncPacer(); goFullscreen()
         if (::sessionLog.isInitialized) sessionLog.log("onResume")
-        if (autoSavedOnStop && cannoliRoot.isNotEmpty()) File(cannoliRoot, "Config/State/quick_resume.txt").delete()
+        if (autoSavedOnStop && cannoliRoot.isNotEmpty()) dev.cannoli.scorza.config.CannoliPaths(cannoliRoot).quickResumeFile.delete()
         autoSavedOnStop = false
+        if (::controllerV2Bridge.isInitialized) {
+            controllerV2Bridge.onDeviceAdded = { device ->
+                val port = portRouter.portFor(device.androidDeviceId)
+                val portLabel = port?.let { "P${it + 1}" } ?: "-"
+                val name = port?.let { portRouter.mappingForPort(it)?.displayName?.takeIf { n -> n.isNotEmpty() } }
+                    ?: device.name.ifEmpty { "Controller" }
+                showOsd("$name connected to $portLabel")
+                if (port != null && ::runner.isInitialized) {
+                    val typeId = portDeviceTypes[port] ?: LibretroRunner.DEVICE_JOYPAD
+                    runner.setControllerPortDevice(port, typeId)
+                }
+            }
+            controllerV2Bridge.onDeviceRemoved = { departed ->
+                val portLabel = departed.port?.let { "P${it + 1}: " } ?: ""
+                showOsd("$portLabel${departed.displayName} disconnected")
+                val port = departed.port
+                if (port != null && ::runner.isInitialized && !loading) {
+                    runner.setInput(port, 0)
+                    runner.setControllerPortDevice(port, LibretroRunner.DEVICE_NONE)
+                }
+            }
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -2501,14 +2532,15 @@ class LibretroActivity : ComponentActivity() {
 
     override fun onDestroy() {
         audioStatsHandler.removeCallbacks(audioStatsRunnable)
+        raStartupTimeout?.let { raStartupHandler.removeCallbacks(it) }
         if (::sessionLog.isInitialized) {
             sessionLog.log("onDestroy (isFinishing=$isFinishing, isChangingConfigurations=$isChangingConfigurations)")
             sessionLog.close()
         }
         isRunning = false
-        if (::controllerManager.isInitialized) {
-            val inputManager = getSystemService(Context.INPUT_SERVICE) as InputManager
-            inputManager.unregisterInputDeviceListener(controllerManager)
+        if (::controllerV2Bridge.isInitialized) {
+            controllerV2Bridge.onDeviceAdded = null
+            controllerV2Bridge.onDeviceRemoved = null
         }
         super.onDestroy()
         cleanup()
@@ -2520,6 +2552,184 @@ class LibretroActivity : ComponentActivity() {
         WindowInsetsControllerCompat(window, window.decorView).apply {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+    }
+
+    private fun buildConnectedRowsForIgm(): List<dev.cannoli.scorza.ui.viewmodel.ConnectedRow> {
+        val routes = portRouter.routes.value
+        val deviceIds = android.view.InputDevice.getDeviceIds().toList()
+        return deviceIds.mapNotNull { id ->
+            val device = android.view.InputDevice.getDevice(id) ?: return@mapNotNull null
+            val mapping = portRouter.mappingFor(id) ?: return@mapNotNull null
+            dev.cannoli.scorza.ui.viewmodel.ConnectedRow(
+                androidDeviceId = id,
+                mapping = mapping,
+                port = routes[id],
+                isBuiltIn = device.vendorId == 0 && device.productId == 0,
+            )
+        }
+    }
+
+    private fun controllersItemsForIgm(): List<Pair<String, Int?>> {
+        val s = controllersViewModel.state.value
+        return s.connected.map { it.mapping.id to it.androidDeviceId } +
+            s.savedMappings.map { it.id to null }
+    }
+
+    /** Order of port slot rows on the Reassign Players screen: P1 .. P4. */
+    private val reassignPortCount = 4
+
+    private fun handleReassignPlayersInput(screen: IGMScreen.ReassignPlayers, button: String?): Boolean {
+        val count = reassignPortCount
+        return when (button) {
+            "btn_up" -> {
+                replaceTop(screen.copy(selectedIndex = ((screen.selectedIndex - 1) + count) % count))
+                true
+            }
+            "btn_down" -> {
+                replaceTop(screen.copy(selectedIndex = (screen.selectedIndex + 1) % count))
+                true
+            }
+            "btn_south" -> {
+                if (screen.swapWithIndex < 0) {
+                    // Begin a swap: arm the row currently selected.
+                    if (deviceForPort(screen.selectedIndex) != null) {
+                        replaceTop(screen.copy(swapWithIndex = screen.selectedIndex))
+                    }
+                } else {
+                    val from = screen.swapWithIndex
+                    val to = screen.selectedIndex
+                    if (from != to) {
+                        val deviceId = deviceForPort(from)
+                        if (deviceId != null) {
+                            portRouter.reassign(deviceId, to)
+                            portPressedKeys[from].clear()
+                            portPressedKeys[to].clear()
+                            runner.setInput(from, 0)
+                            runner.setInput(to, 0)
+                        }
+                    }
+                    replaceTop(screen.copy(swapWithIndex = -1))
+                }
+                true
+            }
+            "btn_east" -> {
+                if (screen.swapWithIndex >= 0) {
+                    replaceTop(screen.copy(swapWithIndex = -1))
+                } else {
+                    pop()
+                }
+                true
+            }
+            else -> true
+        }
+    }
+
+    private fun deviceForPort(port: Int): Int? =
+        portRouter.snapshotEntries().firstOrNull { it.port == port }?.androidDeviceId
+
+    private fun handleControllersInput(screen: IGMScreen.Controllers, button: String?): Boolean {
+        return when (button) {
+            "btn_up" -> {
+                val newIdx = (screen.selectedIndex - 1).coerceAtLeast(0)
+                if (newIdx != screen.selectedIndex) replaceTop(screen.copy(selectedIndex = newIdx))
+                true
+            }
+            "btn_down" -> {
+                val maxIdx = (controllersItemsForIgm().size - 1).coerceAtLeast(0)
+                val newIdx = (screen.selectedIndex + 1).coerceAtMost(maxIdx)
+                if (newIdx != screen.selectedIndex) replaceTop(screen.copy(selectedIndex = newIdx))
+                true
+            }
+            "btn_south" -> {
+                val all = controllersItemsForIgm()
+                val selected = all.getOrNull(screen.selectedIndex) ?: return true
+                push(IGMScreen.ControllerDetail(mappingId = selected.first, androidDeviceId = selected.second))
+                true
+            }
+            "btn_east" -> { pop(); true }
+            else -> true
+        }
+    }
+
+    private fun resolveDetailMapping(screen: IGMScreen.ControllerDetail): dev.cannoli.scorza.input.v2.DeviceMapping? {
+        val s = controllersViewModel.state.value
+        return s.connected.firstOrNull { it.mapping.id == screen.mappingId }?.mapping
+            ?: s.savedMappings.firstOrNull { it.id == screen.mappingId }
+    }
+
+    private fun handleControllerDetailInput(screen: IGMScreen.ControllerDetail, button: String?): Boolean {
+        val mapping = resolveDetailMapping(screen)
+        val rowCount = if (mapping?.userEdited == true) 5 else 4
+        return when (button) {
+            "btn_up" -> {
+                replaceTop(screen.copy(selectedIndex = (screen.selectedIndex - 1).mod(rowCount)))
+                true
+            }
+            "btn_down" -> {
+                replaceTop(screen.copy(selectedIndex = (screen.selectedIndex + 1).mod(rowCount)))
+                true
+            }
+            "btn_left" -> {
+                if (mapping != null) when (screen.selectedIndex) {
+                    1 -> controllersViewModel.cycleConfirmButton(mapping)
+                    2 -> controllersViewModel.cycleGlyphStyle(mapping, -1)
+                    3 -> controllersViewModel.toggleExclude(mapping)
+                }
+                true
+            }
+            "btn_right" -> {
+                if (mapping != null) when (screen.selectedIndex) {
+                    1 -> controllersViewModel.cycleConfirmButton(mapping)
+                    2 -> controllersViewModel.cycleGlyphStyle(mapping, 1)
+                    3 -> controllersViewModel.toggleExclude(mapping)
+                }
+                true
+            }
+            "btn_south" -> {
+                if (mapping == null) return true
+                when (screen.selectedIndex) {
+                    0 -> push(IGMScreen.EditButtons(mappingId = mapping.id))
+                    4 -> if (mapping.userEdited) {
+                        controllersViewModel.resetMapping(mapping)
+                        pop()
+                    }
+                }
+                true
+            }
+            "btn_east" -> { pop(); true }
+            else -> true
+        }
+    }
+
+
+    private fun handleEditButtonsInput(screen: IGMScreen.EditButtons, keyCode: Int, button: String?): Boolean {
+        if (editButtonsController.isListening) return true
+        val maxIdx = (dev.cannoli.scorza.input.v2.CanonicalButton.entries.size - 1).coerceAtLeast(0)
+        return when (button) {
+            "btn_up" -> {
+                val newIdx = (screen.selectedIndex - 1).coerceAtLeast(0)
+                if (newIdx != screen.selectedIndex) replaceTop(screen.copy(selectedIndex = newIdx))
+                true
+            }
+            "btn_down" -> {
+                val newIdx = (screen.selectedIndex + 1).coerceAtMost(maxIdx)
+                if (newIdx != screen.selectedIndex) replaceTop(screen.copy(selectedIndex = newIdx))
+                true
+            }
+            "btn_south" -> {
+                val canonical = dev.cannoli.scorza.input.v2.CanonicalButton.entries.getOrNull(screen.selectedIndex) ?: return true
+                val state = controllersViewModel.state.value
+                val mapping = state.connected.firstOrNull { it.mapping.id == screen.mappingId }?.mapping
+                    ?: state.savedMappings.firstOrNull { it.id == screen.mappingId }
+                    ?: mappingRepository.findById(screen.mappingId)
+                    ?: return true
+                editButtonsController.startListening(mapping, canonical)
+                replaceTop(screen.copy(listeningCanonical = canonical.name))
+                true
+            }
+            "btn_east" -> { pop(); true }
+            else -> true
         }
     }
 }

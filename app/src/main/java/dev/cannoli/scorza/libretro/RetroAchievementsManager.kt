@@ -17,6 +17,7 @@ class RetroAchievementsManager(
     private val onEvent: (type: Int, title: String, description: String, points: Int) -> Unit = { _, _, _, _ -> },
     private val onLogin: (success: Boolean, displayName: String, token: String?) -> Unit = { _, _, _ -> },
     private val onSyncStatus: (message: String) -> Unit = {},
+    private val onDetectionReady: () -> Unit = {},
     private val logger: (String) -> Unit = {}
 ) {
     private val httpExecutor = Executors.newFixedThreadPool(2)
@@ -49,13 +50,25 @@ class RetroAchievementsManager(
         nativeLoginWithPassword(username, password)
     }
 
+    @Volatile private var loadStartedAtMs: Long = 0L
+
+    val isResolving: Boolean
+        get() {
+            val started = loadStartedAtMs
+            if (started == 0L) return false
+            if (gameId > 0 && isMemoryInitialized) return false
+            return android.os.SystemClock.elapsedRealtime() - started < 5_000L
+        }
+
     fun loadGame(romPath: String, consoleId: Int) {
         logger("RA loadGame: romPath=$romPath consoleId=$consoleId")
+        loadStartedAtMs = android.os.SystemClock.elapsedRealtime()
         nativeLoadGame(romPath, consoleId)
     }
 
     fun loadGameById(gameId: Int, consoleId: Int) {
         logger("RA loadGameById: gameId=$gameId consoleId=$consoleId")
+        loadStartedAtMs = android.os.SystemClock.elapsedRealtime()
         nativeLoadGameById(gameId, consoleId)
     }
 
@@ -95,7 +108,10 @@ class RetroAchievementsManager(
     val gameTitle: String get() = nativeGetGameTitle()
     val isOnline: Boolean get() {
         val cm = context?.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager ?: return false
-        return cm.activeNetwork != null
+        val network = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(network) ?: return false
+        return caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
 
     private var cachedAchievements: List<Achievement>? = null
@@ -299,6 +315,21 @@ class RetroAchievementsManager(
         }
     }
 
+    val isMemoryInitialized: Boolean get() = nativeIsMemoryInitialized()
+
+    fun getDetectionStatus(): String {
+        if (!nativeIsLoggedIn()) return "Not logged in"
+        if (gameId <= 0) {
+            return if (isResolving) "Identifying game\u2026" else "Game not recognized"
+        }
+        val achievementCount = getAchievements().size
+        if (achievementCount == 0) return "No achievements published"
+        if (!isMemoryInitialized) {
+            return if (isResolving) "Initializing\u2026" else "Memory init failed"
+        }
+        return "Active \u2022 $achievementCount achievements"
+    }
+
     @Suppress("unused")
     private fun onAchievementEvent(type: Int, achievementId: Int, title: String, description: String, points: Int) {
         logger("RA achievement event: type=$type id=$achievementId title=$title points=$points")
@@ -311,6 +342,12 @@ class RetroAchievementsManager(
         if (type == EVENT_DISCONNECTED) {
             logger("RA disconnected: rcheevos has pending awards that will retry")
             mainHandler.postDelayed({ onSyncStatus("Offline: Will Sync Later") }, 3500)
+            return
+        }
+
+        if (type == EVENT_DETECTION_READY) {
+            logger("RA detection ready: memory init complete")
+            mainHandler.post { onDetectionReady() }
             return
         }
 
@@ -384,6 +421,7 @@ class RetroAchievementsManager(
     private external fun nativeDeserializeProgress(data: ByteArray): Boolean
     private external fun nativeQueueUnlock(achievementId: Int, gameHash: String)
     private external fun nativeGetGameHash(): String
+    private external fun nativeIsMemoryInitialized(): Boolean
     private external fun nativeSetPendingReset()
 
     companion object {
@@ -394,6 +432,7 @@ class RetroAchievementsManager(
         private const val RC_SERVER_ERROR = 503
         private const val EVENT_DISCONNECTED = 17
         private const val EVENT_RECONNECTED = 18
+        private const val EVENT_DETECTION_READY = 1000
         private val CACHE_KEY_STRIP_REGEX = Regex("[&?](t|u)=[^&]+")
 
         val CONSOLE_MAP = mapOf(

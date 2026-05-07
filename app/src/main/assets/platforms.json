@@ -3,82 +3,83 @@
     "name": "Game Boy",
     "core": "gambatte_libretro",
     "app": [
-      { "package": "com.sky.SkyEmu", "action": "android.intent.action.VIEW", "data": "provider" },
-      { "package": "com.explusalpha.GbcEmu", "data": "provider" },
-      { "package": "com.fastemulator.gbc", "action": "android.intent.action.VIEW", "data": "provider" },
-      { "package": "com.pixelrespawn.linkboy", "action": "android.intent.action.VIEW", "data": "provider" },
-      { "package": "it.dbtecno.pizzaboypro", "extraKey": "rom_uri", "extraKind": "provider" },
-      { "package": "it.dbtecno.pizzaboy", "extraKey": "rom_uri", "extraKind": "provider" }
+      { "package": "com.sky.SkyEmu", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      { "package": "com.explusalpha.GbcEmu", "data": { "kind": "file_provider" } },
+      { "package": "com.fastemulator.gbc", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      { "package": "com.pixelrespawn.linkboy", "data": { "kind": "custom_scheme", "scheme": "linkboy", "authority": "emulator" } },
+      { "package": "it.dbtecno.pizzaboypro", "extras": [{ "key": "rom_uri", "kind": "uri_string" }] },
+      { "package": "it.dbtecno.pizzaboy", "extras": [{ "key": "rom_uri", "kind": "uri_string" }] }
     ]
   },
   "GBC": {
     "name": "Game Boy Color",
     "core": "gambatte_libretro",
     "app": [
-      { "package": "com.sky.SkyEmu", "action": "android.intent.action.VIEW", "data": "provider" },
-      { "package": "com.explusalpha.GbcEmu", "data": "provider" },
-      { "package": "com.fastemulator.gbc", "action": "android.intent.action.VIEW", "data": "provider" },
-      { "package": "com.pixelrespawn.linkboy", "action": "android.intent.action.VIEW", "data": "provider" },
-      { "package": "it.dbtecno.pizzaboypro", "extraKey": "rom_uri", "extraKind": "provider" },
-      { "package": "it.dbtecno.pizzaboy", "extraKey": "rom_uri", "extraKind": "provider" }
+      { "package": "com.sky.SkyEmu", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      { "package": "com.explusalpha.GbcEmu", "data": { "kind": "file_provider" } },
+      { "package": "com.fastemulator.gbc", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      { "package": "com.pixelrespawn.linkboy", "data": { "kind": "custom_scheme", "scheme": "linkboy", "authority": "emulator" } },
+      { "package": "it.dbtecno.pizzaboypro", "extras": [{ "key": "rom_uri", "kind": "uri_string" }] },
+      { "package": "it.dbtecno.pizzaboy", "extras": [{ "key": "rom_uri", "kind": "uri_string" }] }
     ]
   },
   "GBA": {
     "name": "Game Boy Advance",
     "core": "mgba_libretro",
     "app": [
-      { "package": "com.hydra.noods", "extraKey": "LaunchPath", "extraKind": "path" },
-      { "package": "com.sky.SkyEmu", "action": "android.intent.action.VIEW", "data": "provider" },
-      { "package": "com.explusalpha.GbaEmu", "data": "provider" },
-      { "package": "com.fastemulator.gba", "action": "android.intent.action.VIEW", "data": "provider" },
-      { "package": "com.pixelrespawn.linkboy", "action": "android.intent.action.VIEW", "data": "provider" },
-      { "package": "it.dbtecno.pizzaboygbapro", "extraKey": "rom_uri", "extraKind": "provider" },
-      { "package": "it.dbtecno.pizzaboygba", "extraKey": "rom_uri", "extraKind": "provider" }
+      { "package": "com.hydra.noods", "extras": [{ "key": "LaunchPath", "kind": "path" }] },
+      { "package": "com.sky.SkyEmu", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      { "package": "com.explusalpha.GbaEmu", "data": { "kind": "file_provider" } },
+      { "package": "com.fastemulator.gba", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      { "package": "com.pixelrespawn.linkboy", "data": { "kind": "custom_scheme", "scheme": "linkboy", "authority": "emulator" } },
+      { "package": "it.dbtecno.pizzaboygbapro", "extras": [{ "key": "rom_uri", "kind": "uri_string" }] },
+      { "package": "it.dbtecno.pizzaboygba", "extras": [{ "key": "rom_uri", "kind": "uri_string" }] }
     ]
   },
   "NES": {
     "name": "Nintendo Entertainment System",
     "core": "nestopia_libretro",
     "app": [
-      { "package": "com.explusalpha.NesEmu", "data": "provider" },
-      { "package": "com.fms.ines.free", "action": "android.intent.action.VIEW", "data": "provider" },
-      { "package": "com.androidemu.nes", "action": "android.intent.action.VIEW", "data": "path" }
+      { "package": "com.explusalpha.NesEmu", "data": { "kind": "file_provider" } },
+      { "package": "com.fms.ines.free", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      { "package": "com.androidemu.nes", "action": "android.intent.action.VIEW", "data": { "kind": "absolute_path" } }
     ]
   },
   "FDS": {
     "name": "Famicom Disk System",
     "core": "nestopia_libretro",
     "app": [
-      { "package": "com.explusalpha.NesEmu", "data": "provider" },
-      { "package": "com.fms.ines.free", "action": "android.intent.action.VIEW", "data": "provider" },
-      { "package": "com.androidemu.nes", "action": "android.intent.action.VIEW", "data": "path" }
+      { "package": "com.explusalpha.NesEmu", "data": { "kind": "file_provider" } },
+      { "package": "com.fms.ines.free", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      { "package": "com.androidemu.nes", "action": "android.intent.action.VIEW", "data": { "kind": "absolute_path" } }
     ]
   },
   "SNES": {
     "name": "Super Nintendo Entertainment System",
     "core": "snes9x_libretro",
     "app": [
-      { "package": "com.explusalpha.Snes9xPlus", "data": "provider" }
+      { "package": "com.explusalpha.Snes9xPlus", "data": { "kind": "file_provider" } }
     ]
   },
   "N64": {
     "name": "Nintendo 64",
     "app": [
-      { "package": "org.mupen64plusae.v3.fzurita.pro", "action": "android.intent.action.VIEW", "data": "provider" },
-      { "package": "org.mupen64plusae.v3.fzurita", "action": "android.intent.action.VIEW", "data": "provider" },
-      { "package": "org.mupen64plusae.v3.alpha", "action": "android.intent.action.VIEW", "data": "provider" }
+      { "package": "org.mupen64plusae.v3.fzurita.pro", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      { "package": "org.mupen64plusae.v3.fzurita", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      { "package": "com.m64.fx.plus.emulate", "activity": "paulscode.android.mupen64plusae.SplashActivity", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      { "package": "org.mupen64plusae.v3.alpha", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } }
     ]
   },
   "NDS": {
     "name": "Nintendo DS",
     "core": "melonds_libretro",
     "app": [
-      { "package": "me.magnum.melonds", "action": "me.magnum.melonds.LAUNCH_ROM", "extraKey": "uri", "extraKind": "provider" },
-      { "package": "me.magnum.melondualds", "action": "me.magnum.melonds.LAUNCH_ROM", "extraKey": "uri", "extraKind": "provider" },
-      { "package": "me.magnum.melonds.nightly", "action": "me.magnum.melonds.nightly.LAUNCH_ROM", "extraKey": "uri", "extraKind": "provider" },
-      { "package": "com.hydra.noods", "extraKey": "LaunchPath", "extraKind": "path" },
-      { "package": "com.dsemu.drastic", "action": "android.intent.action.VIEW", "data": "path" },
-      { "package": "com.sky.SkyEmu", "action": "android.intent.action.VIEW", "data": "provider" }
+      { "package": "me.magnum.melonds", "action": "me.magnum.melonds.LAUNCH_ROM", "extras": [{ "key": "uri", "kind": "uri_parcelable" }] },
+      { "package": "me.magnum.melondualds", "action": "me.magnum.melonds.LAUNCH_ROM", "extras": [{ "key": "uri", "kind": "uri_parcelable" }] },
+      { "package": "me.magnum.melonds.nightly", "action": "me.magnum.melonds.nightly.LAUNCH_ROM", "extras": [{ "key": "uri", "kind": "uri_parcelable" }] },
+      { "package": "com.hydra.noods", "extras": [{ "key": "LaunchPath", "kind": "path" }] },
+      { "package": "com.dsemu.drastic", "activity": "com.dsemu.drastic.DraSticActivity", "action": "android.intent.action.VIEW", "data": { "kind": "absolute_path" } },
+      { "package": "com.sky.SkyEmu", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } }
     ]
   },
 
@@ -86,35 +87,35 @@
     "name": "Game Gear",
     "core": "genesis_plus_gx_libretro",
     "app": [
-      { "package": "com.fms.mg", "action": "android.intent.action.VIEW", "data": "provider" },
-      { "package": "it.dbtecno.pizzaboyscpro", "extraKey": "rom_uri", "extraKind": "provider" },
-      { "package": "it.dbtecno.pizzaboyscbasic", "extraKey": "rom_uri", "extraKind": "provider" }
+      { "package": "com.fms.mg", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      { "package": "it.dbtecno.pizzaboyscpro", "extras": [{ "key": "rom_uri", "kind": "uri_string" }] },
+      { "package": "it.dbtecno.pizzaboyscbasic", "extras": [{ "key": "rom_uri", "kind": "uri_string" }] }
     ]
   },
   "SMS": {
     "name": "Master System",
     "core": "genesis_plus_gx_libretro",
     "app": [
-      { "package": "com.explusalpha.MdEmu", "data": "provider" },
-      { "package": "com.fms.mg", "action": "android.intent.action.VIEW", "data": "provider" },
-      { "package": "it.dbtecno.pizzaboyscpro", "extraKey": "rom_uri", "extraKind": "provider" },
-      { "package": "it.dbtecno.pizzaboyscbasic", "extraKey": "rom_uri", "extraKind": "provider" }
+      { "package": "com.explusalpha.MdEmu", "data": { "kind": "file_provider" } },
+      { "package": "com.fms.mg", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      { "package": "it.dbtecno.pizzaboyscpro", "extras": [{ "key": "rom_uri", "kind": "uri_string" }] },
+      { "package": "it.dbtecno.pizzaboyscbasic", "extras": [{ "key": "rom_uri", "kind": "uri_string" }] }
     ]
   },
   "MD": {
     "name": "Sega Genesis",
     "core": "genesis_plus_gx_libretro",
     "app": [
-      { "package": "com.explusalpha.MdEmu", "data": "provider" },
-      { "package": "it.dbtecno.pizzaboyscpro", "extraKey": "rom_uri", "extraKind": "provider" },
-      { "package": "it.dbtecno.pizzaboyscbasic", "extraKey": "rom_uri", "extraKind": "provider" }
+      { "package": "com.explusalpha.MdEmu", "data": { "kind": "file_provider" } },
+      { "package": "it.dbtecno.pizzaboyscpro", "extras": [{ "key": "rom_uri", "kind": "uri_string" }] },
+      { "package": "it.dbtecno.pizzaboyscbasic", "extras": [{ "key": "rom_uri", "kind": "uri_string" }] }
     ]
   },
   "SG1000": {
     "name": "Sega SG-1000",
     "core": "genesis_plus_gx_libretro",
     "app": [
-      { "package": "com.fms.mg", "action": "android.intent.action.VIEW", "data": "provider" }
+      { "package": "com.fms.mg", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } }
     ]
   },
   "32X": {
@@ -125,18 +126,18 @@
     "name": "Sega CD",
     "core": "genesis_plus_gx_libretro",
     "app": [
-      { "package": "com.explusalpha.MdEmu", "data": "provider" },
-      { "package": "it.dbtecno.pizzaboyscpro", "extraKey": "rom_uri", "extraKind": "provider" },
-      { "package": "it.dbtecno.pizzaboyscbasic", "extraKey": "rom_uri", "extraKind": "provider" }
+      { "package": "com.explusalpha.MdEmu", "data": { "kind": "file_provider" } },
+      { "package": "it.dbtecno.pizzaboyscpro", "extras": [{ "key": "rom_uri", "kind": "uri_string" }] },
+      { "package": "it.dbtecno.pizzaboyscbasic", "extras": [{ "key": "rom_uri", "kind": "uri_string" }] }
     ]
   },
   "SATURN": {
     "name": "Sega Saturn",
     "core": "mednafen_saturn_libretro",
     "app": [
-      { "package": "com.explusalpha.SaturnEmu", "data": "provider" },
-      "org.devmiyax.yabasanshioro2.pro",
-      "org.devmiyax.yabasanshioro2"
+      { "package": "com.explusalpha.SaturnEmu", "data": { "kind": "file_provider" } },
+      { "package": "org.devmiyax.yabasanshioro2.pro", "activity": "org.uoyabause.android.Yabause", "extras": [{ "key": "org.uoyabause.android.FileNameEx", "kind": "path" }] },
+      { "package": "org.devmiyax.yabasanshioro2", "activity": "org.uoyabause.android.Yabause", "extras": [{ "key": "org.uoyabause.android.FileNameEx", "kind": "path" }] }
     ]
   },
 
@@ -144,47 +145,47 @@
     "name": "PlayStation",
     "core": "pcsx_rearmed_libretro",
     "app": [
-      { "package": "com.github.stenzek.duckstation", "extraKey": "bootPath", "extraKind": "provider" },
+      { "package": "com.github.stenzek.duckstation", "activity": "com.github.stenzek.duckstation.EmulationActivity", "action": "android.intent.action.MAIN", "extras": [{ "key": "bootPath", "kind": "uri_string" }] },
       "com.epsxe.ePSXe",
-      { "package": "com.emulator.fpse64", "action": "android.intent.action.VIEW", "data": "provider" },
-      { "package": "com.emulator.fpse", "action": "android.intent.action.VIEW", "data": "provider" }
+      { "package": "com.emulator.fpse64", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      { "package": "com.emulator.fpse", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } }
     ]
   },
   "PSP": {
     "name": "PSP",
     "core": "ppsspp_libretro",
     "app": [
-      { "package": "org.ppsspp.ppssppgold", "action": "android.intent.action.VIEW", "data": "provider" },
-      { "package": "org.ppsspp.ppsspp", "action": "android.intent.action.VIEW", "data": "provider" }
+      { "package": "org.ppsspp.ppssppgold", "activity": "org.ppsspp.ppssppgold.PpssppActivity", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      { "package": "org.ppsspp.ppsspp", "activity": "org.ppsspp.ppsspp.PpssppActivity", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } }
     ]
   },
   "DC": {
     "name": "Dreamcast",
     "core": "flycast_libretro",
     "app": [
-      { "package": "com.flycast.emulator", "action": "android.intent.action.VIEW", "data": "provider" },
-      { "package": "io.recompiled.redream", "action": "android.intent.action.VIEW", "data": "provider" }
+      { "package": "com.flycast.emulator", "activity": "com.flycast.emulator.MainActivity", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      { "package": "io.recompiled.redream", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } }
     ]
   },
   "LYNX": {
     "name": "Atari Lynx",
     "core": "handy_libretro",
     "app": [
-      { "package": "com.explusalpha.LynxEmu", "data": "provider" }
+      { "package": "com.explusalpha.LynxEmu", "data": { "kind": "file_provider" } }
     ]
   },
   "JAGUAR": {
     "name": "Atari Jaguar",
     "core": "virtualjaguar_libretro",
     "app": [
-      { "package": "ru.vastness.altmer.iratajaguar", "data": "provider" }
+      { "package": "ru.vastness.altmer.iratajaguar", "data": { "kind": "file_provider" } }
     ]
   },
   "ATARI2600": {
     "name": "Atari 2600",
     "core": "stella_libretro",
     "app": [
-      { "package": "com.explusalpha.A2600Emu", "data": "provider" }
+      { "package": "com.explusalpha.A2600Emu", "data": { "kind": "file_provider" } }
     ]
   },
   "ATARI5200": {
@@ -199,7 +200,7 @@
     "name": "PC Engine",
     "core": "mednafen_pce_fast_libretro",
     "app": [
-      { "package": "com.PceEmu", "data": "provider" }
+      { "package": "com.PceEmu", "data": { "kind": "file_provider" } }
     ]
   },
   "PCFX": {
@@ -210,28 +211,28 @@
     "name": "Neo Geo Pocket",
     "core": "mednafen_ngp_libretro",
     "app": [
-      { "package": "com.explusalpha.NgpEmu", "data": "provider" }
+      { "package": "com.explusalpha.NgpEmu", "data": { "kind": "file_provider" } }
     ]
   },
   "NGPC": {
     "name": "Neo Geo Pocket Color",
     "core": "mednafen_ngp_libretro",
     "app": [
-      { "package": "com.explusalpha.NgpEmu", "data": "provider" }
+      { "package": "com.explusalpha.NgpEmu", "data": { "kind": "file_provider" } }
     ]
   },
   "WS": {
     "name": "WonderSwan",
     "core": "mednafen_wswan_libretro",
     "app": [
-      { "package": "com.explusalpha.SwanEmu", "data": "provider" }
+      { "package": "com.explusalpha.SwanEmu", "data": { "kind": "file_provider" } }
     ]
   },
   "WSC": {
     "name": "WonderSwan Color",
     "core": "mednafen_wswan_libretro",
     "app": [
-      { "package": "com.explusalpha.SwanEmu", "data": "provider" }
+      { "package": "com.explusalpha.SwanEmu", "data": { "kind": "file_provider" } }
     ]
   },
 
@@ -240,8 +241,9 @@
     "core": "fbneo_libretro",
     "arcade": true,
     "app": [
-      { "package": "com.explusalpha.NeoEmu", "data": "provider" },
-      { "package": "com.seleuco.mame4droid", "action": "android.intent.action.VIEW", "data": "provider" }
+      { "package": "com.explusalpha.NeoEmu", "data": { "kind": "file_provider" } },
+      { "package": "com.seleuco.mame4droid", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      "com.bangkokfusion.finalburn"
     ]
   },
   "MAME": {
@@ -249,9 +251,10 @@
     "core": "mame2003_plus_libretro",
     "arcade": true,
     "app": [
-      { "package": "com.seleuco.mame4droid", "action": "android.intent.action.VIEW", "data": "provider" },
-      { "package": "com.explusalpha.NeoEmu", "data": "provider" },
-      { "package": "com.flycast.emulator", "action": "android.intent.action.VIEW", "data": "provider" }
+      { "package": "com.seleuco.mame4droid", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      { "package": "com.explusalpha.NeoEmu", "data": { "kind": "file_provider" } },
+      { "package": "com.flycast.emulator", "activity": "com.flycast.emulator.MainActivity", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      "com.bangkokfusion.finalburn"
     ]
   },
   "FBN": {
@@ -259,16 +262,17 @@
     "core": "fbneo_libretro",
     "arcade": true,
     "app": [
-      { "package": "com.seleuco.mame4droid", "action": "android.intent.action.VIEW", "data": "provider" },
-      { "package": "com.explusalpha.NeoEmu", "data": "provider" },
-      { "package": "com.flycast.emulator", "action": "android.intent.action.VIEW", "data": "provider" }
+      { "package": "com.seleuco.mame4droid", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      { "package": "com.explusalpha.NeoEmu", "data": { "kind": "file_provider" } },
+      { "package": "com.flycast.emulator", "activity": "com.flycast.emulator.MainActivity", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      "com.bangkokfusion.finalburn"
     ]
   },
   "VIRTUALBOY": {
     "name": "Virtual Boy",
     "core": "mednafen_vb_libretro",
     "app": [
-      { "package": "com.simongellis.vvb", "action": "android.intent.action.VIEW", "data": "provider" }
+      { "package": "com.simongellis.vvb", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } }
     ]
   },
   "POKEMINI": {
@@ -280,9 +284,9 @@
     "name": "ColecoVision",
     "core": "bluemsx_libretro",
     "app": [
-      { "package": "com.explusalpha.MsxEmu", "data": "provider" },
-      { "package": "com.fms.colem.deluxe", "action": "android.intent.action.VIEW", "data": "provider" },
-      { "package": "com.fms.colem", "action": "android.intent.action.VIEW", "data": "provider" }
+      { "package": "com.explusalpha.MsxEmu", "data": { "kind": "file_provider" } },
+      { "package": "com.fms.colem.deluxe", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      { "package": "com.fms.colem", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } }
     ]
   },
   "VECTREX": {
@@ -297,13 +301,17 @@
     "name": "PC Engine SuperGrafx",
     "core": "mednafen_supergrafx_libretro",
     "app": [
-      { "package": "com.PceEmu", "data": "provider" }
+      { "package": "com.PceEmu", "data": { "kind": "file_provider" } }
     ]
   },
 
   "DOS": {
     "name": "DOS",
-    "core": "dosbox_pure_libretro"
+    "core": "dosbox_pure_libretro",
+    "app": [
+      "com.fishstix.dosbox",
+      "bruenor.magicbox"
+    ]
   },
   "SCUMMVM": {
     "name": "ScummVM",
@@ -320,47 +328,51 @@
   "PS2": {
     "name": "PlayStation 2",
     "app": [
-      { "package": "xyz.aethersx2.android", "action": "android.intent.action.MAIN", "extraKey": "bootPath", "extraKind": "provider" },
-      { "package": "come.nanodata.armsx2", "action": "android.intent.action.VIEW", "data": "provider" },
-      { "package": "com.sbro.emucorex", "action": "android.intent.action.VIEW", "data": "provider" },
-      "com.virtualapplications.play"
+      { "package": "xyz.aethersx2.android", "activity": "xyz.aethersx2.android.EmulationActivity", "action": "android.intent.action.MAIN", "extras": [{ "key": "bootPath", "kind": "uri_string" }], "intentFlags": 268468224 },
+      { "package": "come.nanodata.armsx2", "activity": "kr.co.iefriends.pcsx2.activities.MainActivity", "action": "android.intent.action.VIEW" },
+      { "package": "com.sbro.emucorex", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      "com.virtualapplications.play",
+      "net.pcsx2.emulator"
     ]
   },
   "GC": {
     "name": "GameCube",
     "core": "dolphin_libretro",
     "app": [
-      { "package": "org.dolphinemu.dolphinemu", "action": "android.intent.action.MAIN", "extraKey": "AutoStartFile", "extraKind": "provider" },
-      { "package": "org.mm.jr", "action": "android.intent.action.VIEW", "extraKey": "AutoStartFile", "extraKind": "provider" },
-      { "package": "org.dolphinemu.mmjr", "action": "android.intent.action.VIEW", "extraKey": "AutoStartFile", "extraKind": "provider" }
+      { "package": "org.dolphinemu.dolphinemu", "activity": "org.dolphinemu.dolphinemu.ui.main.MainActivity", "action": "android.intent.action.MAIN", "extras": [{ "key": "AutoStartFile", "kind": "path" }] },
+      { "package": "org.dolphinemu.handheld", "activity": "org.dolphinemu.dolphinemu.ui.main.MainActivity", "action": "android.intent.action.MAIN", "extras": [{ "key": "AutoStartFile", "kind": "path" }] },
+      { "package": "org.mm.jr", "action": "android.intent.action.VIEW", "extras": [{ "key": "AutoStartFile", "kind": "uri_string" }] },
+      { "package": "org.dolphinemu.mmjr", "action": "android.intent.action.VIEW", "extras": [{ "key": "AutoStartFile", "kind": "uri_string" }] }
     ]
   },
   "WII": {
     "name": "Wii",
     "core": "dolphin_libretro",
     "app": [
-      { "package": "org.dolphinemu.dolphinemu", "action": "android.intent.action.MAIN", "extraKey": "AutoStartFile", "extraKind": "provider" },
-      { "package": "org.mm.jr", "action": "android.intent.action.VIEW", "extraKey": "AutoStartFile", "extraKind": "provider" },
-      { "package": "org.dolphinemu.mmjr", "action": "android.intent.action.VIEW", "extraKey": "AutoStartFile", "extraKind": "provider" }
+      { "package": "org.dolphinemu.dolphinemu", "activity": "org.dolphinemu.dolphinemu.ui.main.MainActivity", "action": "android.intent.action.MAIN", "extras": [{ "key": "AutoStartFile", "kind": "path" }] },
+      { "package": "org.dolphinemu.handheld", "activity": "org.dolphinemu.dolphinemu.ui.main.MainActivity", "action": "android.intent.action.MAIN", "extras": [{ "key": "AutoStartFile", "kind": "path" }] },
+      { "package": "org.mm.jr", "action": "android.intent.action.VIEW", "extras": [{ "key": "AutoStartFile", "kind": "uri_string" }] },
+      { "package": "org.dolphinemu.mmjr", "action": "android.intent.action.VIEW", "extras": [{ "key": "AutoStartFile", "kind": "uri_string" }] }
     ]
   },
   "3DS": {
     "name": "Nintendo 3DS",
     "core": "citra_libretro",
     "app": [
-      { "package": "org.azahar_emu.azahar", "data": "provider" },
-      { "package": "io.github.azaharplus.android", "data": "provider" },
-      { "package": "org.citra.citra_emu", "data": "provider" },
-      { "package": "org.citra.citra_emu.canary", "data": "provider" },
-      { "package": "io.github.lime3ds.android", "data": "provider" },
-      { "package": "io.github.mandarine3ds.mandarine", "data": "provider" },
-      { "package": "com.panda3ds.pandroid", "data": "provider" }
+      { "package": "org.azahar_emu.azahar", "activity": "org.citra.citra_emu.activities.EmulationActivity", "extras": [{ "key": "SelectedGame", "kind": "path" }] },
+      { "package": "io.github.azaharplus.android", "data": { "kind": "file_provider" } },
+      { "package": "org.citra.citra_emu", "activity": "org.citra.citra_emu.activities.EmulationActivity", "extras": [{ "key": "SelectedGame", "kind": "path" }] },
+      { "package": "org.citra.citra_emu.canary", "data": { "kind": "file_provider" } },
+      { "package": "io.github.borked3ds.android", "activity": "io.github.borked3ds.android.activities.EmulationActivity" },
+      { "package": "io.github.lime3ds.android", "data": { "kind": "file_provider" } },
+      { "package": "io.github.mandarine3ds.mandarine", "data": { "kind": "file_provider" } },
+      { "package": "com.panda3ds.pandroid", "data": { "kind": "file_provider" } }
     ]
   },
   "WIIU": {
     "name": "Wii U",
     "app": [
-      { "package": "info.cemu.cemu", "data": "provider" }
+      { "package": "info.cemu.cemu", "data": { "kind": "file_provider" } }
     ]
   },
   "PSVITA": {
@@ -373,17 +385,21 @@
   "PS3": {
     "name": "PlayStation 3",
     "app": [
-      { "package": "aenu.aps3e.premium", "action": "aenu.intent.action.APS3E", "extraKey": "iso_uri", "extraKind": "provider" },
-      { "package": "aenu.aps3e", "action": "aenu.intent.action.APS3E", "extraKey": "iso_uri", "extraKind": "provider" }
+      { "package": "aenu.aps3e.premium", "action": "aenu.intent.action.APS3E", "extras": [{ "key": "iso_uri", "kind": "uri_string" }] },
+      { "package": "aenu.aps3e", "action": "aenu.intent.action.APS3E", "extras": [{ "key": "iso_uri", "kind": "uri_string" }] }
     ]
   },
   "NSW": {
     "name": "Nintendo Switch",
     "app": [
-      { "package": "dev.eden.eden_emulator", "action": "android.nfc.action.TECH_DISCOVERED", "data": "provider" },
-      { "package": "dev.legacy.eden_emulator", "action": "android.nfc.action.TECH_DISCOVERED", "data": "provider" },
-      { "package": "org.kenjinx.android", "action": "org.kenjinx.android.LAUNCH_GAME", "extraKey": "bootPath", "extraKind": "provider" },
-      { "package": "skyline.emu", "action": "android.intent.action.VIEW", "data": "provider" }
+      { "package": "dev.eden.eden_emulator", "action": "android.nfc.action.TECH_DISCOVERED", "data": { "kind": "file_provider" } },
+      { "package": "dev.legacy.eden_emulator", "action": "android.nfc.action.TECH_DISCOVERED", "data": { "kind": "file_provider" } },
+      { "package": "org.kenjinx.android", "action": "org.kenjinx.android.LAUNCH_GAME", "extras": [{ "key": "bootPath", "kind": "uri_string" }] },
+      { "package": "skyline.emu", "action": "android.intent.action.VIEW", "data": { "kind": "file_provider" } },
+      { "package": "org.yuzu.yuzu_emu", "activity": "org.yuzu.yuzu_emu.activities.EmulationActivity" },
+      "org.stratoemu.strato",
+      { "package": "org.citron.emu", "activity": "org.citron.citron_emu.activities.EmulationActivity" },
+      { "package": "org.sudachi.sudachi_emu", "activity": "org.sudachi.sudachi_emu.activities.EmulationActivity" }
     ]
   }
 }

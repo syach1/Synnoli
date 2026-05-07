@@ -1,5 +1,6 @@
 package dev.cannoli.scorza.util
 
+import dev.cannoli.scorza.config.CannoliPaths
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -7,11 +8,11 @@ import java.util.Locale
 
 class AtomicRename(private val cannoliRoot: File) {
 
-    private val backupDir get() = File(cannoliRoot, "Backup")
-    private val savesDir get() = File(cannoliRoot, "Saves")
-    private val statesDir get() = File(cannoliRoot, "Save States")
-    private val artDir get() = File(cannoliRoot, "Art")
-    private val collectionsDir get() = File(cannoliRoot, "Collections")
+    private val paths = CannoliPaths(cannoliRoot)
+    private val backupDir get() = paths.backupDir
+    private val savesDir get() = paths.savesDir
+    private val statesDir get() = paths.saveStatesDir
+    private val artDir get() = paths.artDir
 
     data class RenameResult(val success: Boolean, val error: String? = null)
 
@@ -39,6 +40,8 @@ class AtomicRename(private val cannoliRoot: File) {
             if (stateSubDir.isDirectory) {
                 stateSubDir.copyRecursively(File(backupTagDir, "statedir_$oldBaseName"), overwrite = true)
             }
+            // Back up anything at the target name that the rename phase would clobber.
+            backupTargetCollateral(backupTagDir, romDir, extension, newBaseName, platformTag)
         } catch (e: Exception) {
             backupTagDir.deleteRecursively()
             return RenameResult(false, "Backup failed: ${e.message}")
@@ -65,7 +68,6 @@ class AtomicRename(private val cannoliRoot: File) {
             if (stateSubDir.isDirectory) {
                 stateSubDir.renameTo(File(File(statesDir, platformTag), newBaseName))
             }
-            updateCollectionReferences(romFile.absolutePath, newRomFile.absolutePath)
             updateMapFile(romDir, romFile.name, "$newBaseName.$extension")
         } catch (e: Exception) {
             try {
@@ -77,9 +79,50 @@ class AtomicRename(private val cannoliRoot: File) {
         return RenameResult(true)
     }
 
+    private fun backupTargetCollateral(
+        rootBackupDir: File,
+        romDir: File,
+        romExt: String,
+        newBaseName: String,
+        tag: String
+    ) {
+        val targetRom = File(romDir, "$newBaseName.$romExt")
+        val targetArt = findArtFile(tag, newBaseName)
+        val targetSaves = findMatchingFiles(File(savesDir, tag), newBaseName)
+        val targetStates = findMatchingFiles(File(statesDir, tag), newBaseName)
+        val targetStateSub = File(File(statesDir, tag), newBaseName)
+
+        val anyTarget = targetRom.exists() || targetArt != null ||
+            targetSaves.isNotEmpty() || targetStates.isNotEmpty() ||
+            targetStateSub.isDirectory
+        if (!anyTarget) return
+
+        val targetBackup = File(rootBackupDir, "target")
+        targetBackup.mkdirs()
+        if (targetRom.exists()) {
+            targetRom.copyTo(File(targetBackup, targetRom.name), overwrite = true)
+        }
+        targetArt?.let { artFile ->
+            artFile.copyTo(File(targetBackup, artFile.name), overwrite = true)
+        }
+        targetSaves.forEach { save ->
+            save.copyTo(File(targetBackup, "saves_${save.name}"), overwrite = true)
+        }
+        targetStates.forEach { state ->
+            state.copyTo(File(targetBackup, "states_${state.name}"), overwrite = true)
+        }
+        if (targetStateSub.isDirectory) {
+            targetStateSub.copyRecursively(File(targetBackup, "statedir_$newBaseName"), overwrite = true)
+        }
+    }
+
     private fun rollback(backupDir: File, originalRom: File, tag: String, oldBaseName: String) {
         val romDir = originalRom.parentFile ?: return
         backupDir.listFiles()?.forEach { backup ->
+            // The "target" subdir holds files that lived at the new name before
+            // the rename clobbered them. Rollback only restores source-side state,
+            // so leave target-side captures alone.
+            if (backup.isDirectory && backup.name == "target") return@forEach
             when {
                 backup.name.startsWith("saves_") -> {
                     val origName = backup.name.removePrefix("saves_")
@@ -138,18 +181,4 @@ class AtomicRename(private val cannoliRoot: File) {
         } catch (_: java.io.IOException) { }
     }
 
-    private fun updateCollectionReferences(oldPath: String, newPath: String) {
-        if (!collectionsDir.exists()) return
-        collectionsDir.listFiles { f -> f.extension == "txt" }?.forEach { collFile ->
-            try {
-                val lines = collFile.readLines()
-                val updated = lines.map { line ->
-                    if (line.trim() == oldPath) newPath else line
-                }
-                if (updated != lines) {
-                    collFile.writeText(updated.joinToString("\n") + "\n")
-                }
-            } catch (_: Exception) { }
-        }
-    }
 }

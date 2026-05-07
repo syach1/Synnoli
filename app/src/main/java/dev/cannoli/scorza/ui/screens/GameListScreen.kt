@@ -2,7 +2,6 @@ package dev.cannoli.scorza.ui.screens
 
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,16 +11,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,21 +35,22 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.cannoli.scorza.R
-import dev.cannoli.scorza.model.Game
+import dev.cannoli.scorza.model.AppType
+import dev.cannoli.scorza.model.ListItem
 import dev.cannoli.scorza.settings.ArtScale
 import dev.cannoli.scorza.ui.components.DialogOverlay
 import dev.cannoli.scorza.ui.viewmodel.GameListViewModel
 import dev.cannoli.ui.ButtonStyle
+import dev.cannoli.ui.STAR
 import dev.cannoli.ui.START_GLYPH
 import dev.cannoli.ui.components.BottomBar
 import dev.cannoli.ui.components.ConfirmOverlay
 import dev.cannoli.ui.components.LaunchErrorDialog
 import dev.cannoli.ui.components.List
-import dev.cannoli.ui.components.MarqueeEffect
 import dev.cannoli.ui.components.MessageOverlay
 import dev.cannoli.ui.components.MissingAppDialog
 import dev.cannoli.ui.components.MissingCoreDialog
-import dev.cannoli.ui.components.PillRow
+import dev.cannoli.ui.components.PillRowText
 import dev.cannoli.ui.components.ScreenBackground
 import dev.cannoli.ui.components.ScreenTitle
 import dev.cannoli.ui.components.footerReservation
@@ -60,6 +61,28 @@ import dev.cannoli.ui.theme.Radius
 import dev.cannoli.ui.theme.Spacing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+
+private fun ListItem.rowDisplayName(showStar: Boolean): String = when (this) {
+    is ListItem.RomItem -> if (showStar) "$STAR ${rom.displayName}" else rom.displayName
+    is ListItem.AppItem -> if (showStar) "$STAR ${app.displayName}" else app.displayName
+    is ListItem.SubfolderItem -> name
+    is ListItem.CollectionItem -> collection.displayName
+    is ListItem.ChildCollectionItem -> "/${collection.displayName}"
+}
+
+private val ListItem.itemKey: String get() = when (this) {
+    is ListItem.RomItem -> "rom:${rom.id}"
+    is ListItem.AppItem -> "app:${app.id}"
+    is ListItem.SubfolderItem -> "sub:$path"
+    is ListItem.CollectionItem -> "coll:${collection.stem}"
+    is ListItem.ChildCollectionItem -> "child:${collection.stem}"
+}
+
+private val ListItem.isLeafSelectable: Boolean get() = this is ListItem.RomItem || this is ListItem.AppItem
+
+private val ListItem.artPath: String? get() = (this as? ListItem.RomItem)?.rom?.artFile?.absolutePath
+
+private val ListItem.resumeKey: String? get() = (this as? ListItem.RomItem)?.rom?.path?.absolutePath
 
 @Composable
 fun GameListScreen(
@@ -79,10 +102,17 @@ fun GameListScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val itemHeight = pillItemHeight(listLineHeight, listVerticalPadding)
-    val selectedGame = state.games.getOrNull(state.selectedIndex)
-    val hasResumeState = selectedGame != null && !selectedGame.isSubfolder && resumableGames.contains(selectedGame.file.absolutePath)
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = state.scrollTarget.coerceAtLeast(0))
 
-    val artPath = if (selectedGame != null && !selectedGame.isSubfolder) selectedGame.artFile?.absolutePath else null
+    DisposableEffect(Unit) {
+        onDispose { viewModel.savePosition(listState.firstVisibleItemIndex) }
+    }
+
+    val selected = state.items.getOrNull(state.selectedIndex)
+    val resumeKey = selected?.resumeKey
+    val hasResumeState = resumeKey != null && resumableGames.contains(resumeKey)
+
+    val artPath = selected?.artPath
     val selectedArt by produceState<ImageBitmap?>(null, artPath) {
         value = if (artPath != null) {
             withContext(Dispatchers.IO) {
@@ -99,6 +129,20 @@ fun GameListScreen(
                 } catch (_: Exception) { null }
             }
         } else null
+    }
+
+    val inFavoritesCollection = state.isCollection &&
+        state.collectionName?.equals("Favorites", ignoreCase = true) == true
+    val showFavoriteStars = viewModel.showFavoriteStars && !inFavoritesCollection
+    val favoriteRomIds = state.favoriteRomIds
+    val favoriteAppIds = state.favoriteAppIds
+    val duplicateRomNames = remember(state.items) {
+        state.items.asSequence()
+            .filterIsInstance<ListItem.RomItem>()
+            .groupingBy { it.rom.displayName }
+            .eachCount()
+            .filterValues { it > 1 }
+            .keys
     }
 
     ScreenBackground(backgroundImagePath = backgroundImagePath, backgroundTint = backgroundTint) {
@@ -119,7 +163,7 @@ fun GameListScreen(
                     lineHeight = listLineHeight,
                 )
                 Spacer(modifier = Modifier.height(Spacing.Sm))
-                if (state.games.isEmpty()) {
+                if (state.items.isEmpty()) {
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
@@ -141,25 +185,38 @@ fun GameListScreen(
                                 .then(if (showArt) Modifier.fillMaxWidth(1f - artWidth / 100f) else Modifier.fillMaxWidth())
                         ) {
                             List(
-                                items = state.games,
+                                items = state.items,
                                 selectedIndex = state.selectedIndex,
                                 itemHeight = itemHeight,
                                 scrollTarget = state.scrollTarget,
+                                listState = listState,
                                 reorderMode = state.reorderMode,
                                 onVisibleRangeChanged = { first, count, full ->
                                     viewModel.firstVisibleIndex = first
                                     onVisibleRangeChanged(first, count, full)
                                 },
-                                key = if (state.reorderMode) null else { _, game -> game.file.absolutePath }
-                            ) { index, game, isSelected ->
-                                GameRow(
-                                    game = game,
+                                key = if (state.reorderMode) null else { _, item -> item.itemKey }
+                            ) { index, item, isSelected ->
+                                val starred = showFavoriteStars && when (item) {
+                                    is ListItem.RomItem -> item.rom.id in favoriteRomIds
+                                    is ListItem.AppItem -> item.app.id in favoriteAppIds
+                                    else -> false
+                                }
+                                val tagSuffix = (item as? ListItem.RomItem)
+                                    ?.takeIf { it.rom.displayName in duplicateRomNames }
+                                    ?.rom?.tags
+                                val displayName = item.rowDisplayName(showStar = false)
+                                val withStar = if (starred) "$STAR $displayName" else displayName
+                                val label = if (item is ListItem.SubfolderItem) "/ $withStar" else withStar
+                                PillRowText(
+                                    label = label,
                                     isSelected = isSelected,
                                     fontSize = listFontSize,
                                     lineHeight = listLineHeight,
                                     verticalPadding = listVerticalPadding,
                                     showReorderIcon = state.reorderMode && isSelected,
-                                    checkState = if (state.multiSelectMode && !game.isSubfolder && !game.isChildCollection) index in state.checkedIndices else null
+                                    checkState = if (state.multiSelectMode && item.isLeafSelectable) index in state.checkedIndices else null,
+                                    tagSuffix = tagSuffix,
                                 )
                             }
                         }
@@ -193,11 +250,12 @@ fun GameListScreen(
                 }
             }
 
+            val isToolApp = (selected as? ListItem.AppItem)?.app?.type == AppType.TOOL
             val actionLabel = if (state.multiSelectMode) {
                 stringResource(R.string.label_toggle)
-            } else if (selectedGame?.isSubfolder == true || state.isCollectionsList) {
+            } else if (selected is ListItem.SubfolderItem || state.isCollectionsList) {
                 stringResource(R.string.label_open)
-            } else if (selectedGame?.platformTag == "tools") {
+            } else if (isToolApp) {
                 stringResource(R.string.label_launch)
             } else {
                 stringResource(R.string.label_play)
@@ -208,7 +266,7 @@ fun GameListScreen(
                 add(buttonStyle.back to stringResource(R.string.label_back))
                 if (showNewButton) add(buttonStyle.west to stringResource(R.string.label_new))
             }
-            val rightItems = if (state.games.isEmpty()) {
+            val rightItems = if (state.items.isEmpty()) {
                 emptyList()
             } else if (state.multiSelectMode) {
                 listOf(buttonStyle.confirm to actionLabel, START_GLYPH to stringResource(R.string.label_confirm))
@@ -271,64 +329,3 @@ fun GameListScreen(
     }
 }
 
-@Composable
-private fun GameRow(
-    game: Game,
-    isSelected: Boolean,
-    fontSize: TextUnit,
-    lineHeight: TextUnit,
-    verticalPadding: Dp,
-    showReorderIcon: Boolean = false,
-    checkState: Boolean? = null
-) {
-    val textStyle = MaterialTheme.typography.bodyLarge.copy(
-        fontSize = fontSize,
-        lineHeight = lineHeight
-    )
-    val scrollState = rememberScrollState()
-    MarqueeEffect(scrollState, isSelected, key = game.displayName to isSelected)
-
-    val colors = LocalCannoliColors.current
-    PillRow(isSelected = isSelected, verticalPadding = verticalPadding, lineHeight = lineHeight) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (checkState != null) {
-                Text(
-                    text = if (checkState) "☑" else "☐",
-                    style = textStyle,
-                    color = if (isSelected) colors.highlightText else colors.text
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-            }
-            if (showReorderIcon) {
-                Text(
-                    text = "↕",
-                    style = textStyle,
-                    color = if (isSelected) colors.highlightText else colors.text
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-            }
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .horizontalScroll(scrollState),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (game.isSubfolder) {
-                    Text(
-                        text = "/",
-                        style = textStyle,
-                        color = if (isSelected) colors.highlightText else colors.text
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                }
-                Text(
-                    text = game.displayName,
-                    style = textStyle,
-                    color = if (isSelected) colors.highlightText else colors.text,
-                    maxLines = 1,
-                    softWrap = false
-                )
-            }
-        }
-    }
-}

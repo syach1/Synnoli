@@ -34,7 +34,6 @@ import dev.cannoli.ui.R
 import dev.cannoli.ui.theme.LocalCannoliColors
 import dev.cannoli.ui.theme.LocalCannoliFont
 import dev.cannoli.ui.theme.LocalScaleFactor
-import dev.cannoli.ui.theme.MPlus1Code
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -46,6 +45,32 @@ private const val ICON_VPN = "\uDB82\uDFC4"
 private const val ICON_UPDATE = "\uDB81\uDEB0"
 private const val ICON_CHARGING = "\uF0E7"
 
+private const val ICON_BATTERY_FULL = "\uDB80\uDC79"
+private const val ICON_BATTERY_90 = "\uDB80\uDC82"
+private const val ICON_BATTERY_80 = "\uDB80\uDC81"
+private const val ICON_BATTERY_70 = "\uDB80\uDC80"
+private const val ICON_BATTERY_60 = "\uDB80\uDC7F"
+private const val ICON_BATTERY_50 = "\uDB80\uDC7E"
+private const val ICON_BATTERY_40 = "\uDB80\uDC7D"
+private const val ICON_BATTERY_30 = "\uDB80\uDC7C"
+private const val ICON_BATTERY_20 = "\uDB80\uDC7B"
+private const val ICON_BATTERY_10 = "\uDB80\uDC7A"
+private const val ICON_BATTERY_ALERT = "\uDB80\uDC83"
+
+private fun batteryLevelIcon(percent: Int): String = when {
+    percent >= 95 -> ICON_BATTERY_FULL
+    percent >= 85 -> ICON_BATTERY_90
+    percent >= 75 -> ICON_BATTERY_80
+    percent >= 65 -> ICON_BATTERY_70
+    percent >= 55 -> ICON_BATTERY_60
+    percent >= 45 -> ICON_BATTERY_50
+    percent >= 35 -> ICON_BATTERY_40
+    percent >= 25 -> ICON_BATTERY_30
+    percent >= 15 -> ICON_BATTERY_20
+    percent >= 5 -> ICON_BATTERY_10
+    else -> ICON_BATTERY_ALERT
+}
+
 @Composable
 fun StatusBar(
     updateAvailable: Boolean = false,
@@ -54,6 +79,7 @@ fun StatusBar(
     showVpn: Boolean = false,
     showClock: Boolean = true,
     showBattery: Boolean = true,
+    batteryIconOnly: Boolean = false,
     showUpdate: Boolean = true,
     use24hTime: Boolean = false,
     textSizeSp: Int = 16
@@ -149,17 +175,17 @@ fun StatusBar(
     val fontSize = (textSizeSp * scaleFactor).sp
 
     val iconStyle = TextStyle(
-        fontFamily = MPlus1Code,
+        fontFamily = LocalCannoliFont.current,
         fontWeight = FontWeight.Normal,
         fontSize = fontSize,
-        color = colors.text
+        color = colors.statusBar
     )
 
     val textStyle = TextStyle(
         fontFamily = LocalCannoliFont.current,
         fontWeight = FontWeight.Normal,
         fontSize = fontSize,
-        color = colors.text
+        color = colors.statusBar
     )
 
     val showUpdateIcon = updateAvailable && showUpdate
@@ -181,7 +207,11 @@ fun StatusBar(
         if (showVpnIcon) Text(text = ICON_VPN, style = iconStyle)
         if (showBattery) {
             if (isCharging) Text(text = ICON_CHARGING, style = iconStyle)
-            Text(text = batteryPercent, style = textStyle)
+            if (batteryIconOnly) {
+                Text(text = batteryLevelIcon(batteryLevel), style = iconStyle)
+            } else {
+                Text(text = batteryPercent, style = textStyle)
+            }
         }
         if (showClock) Text(text = timeText, style = textStyle)
     }

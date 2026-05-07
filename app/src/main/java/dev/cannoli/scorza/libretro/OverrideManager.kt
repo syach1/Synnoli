@@ -1,7 +1,7 @@
 package dev.cannoli.scorza.libretro
 
 import dev.cannoli.igm.ShortcutAction
-import dev.cannoli.scorza.input.ProfileManager
+import dev.cannoli.scorza.config.CannoliPaths
 import dev.cannoli.scorza.util.IniParser
 import dev.cannoli.scorza.util.IniWriter
 import java.io.File
@@ -14,10 +14,11 @@ class OverrideManager(
     private val gameBaseName: String,
     coreName: String = ""
 ) {
-    private val overridesDir = File(cannoliRoot, "Config/Overrides")
+    private val paths = CannoliPaths(cannoliRoot)
+    private val overridesDir = paths.configOverrides
     private val globalFile = File(overridesDir, "global.ini")
-    private val platformFile = File(overridesDir, "systems/$platformTag.ini")
-    private val gameFile = File(overridesDir, "Games/$platformTag/$gameBaseName.ini")
+    private val platformFile = paths.systemOverrideFile(platformTag)
+    private val gameFile = paths.gameOverrideFile(platformTag, gameBaseName)
 
     init {
         if (coreName.isNotEmpty() && !platformFile.exists()) {
@@ -46,13 +47,13 @@ class OverrideManager(
         var crtNoise: Float = 0.15f,
         var shaderPreset: String = "",
         var overlay: String = "",
-        var profileName: String = ProfileManager.DEFAULT_GAME,
         var shortcutSource: OverrideSource = OverrideSource.GLOBAL,
-        var controls: Map<String, Int> = emptyMap(),
         var shortcuts: Map<ShortcutAction, Set<Int>> = emptyMap(),
-        var controllerTypeId: Int = -1,
         var coreOptions: Map<String, String> = emptyMap(),
-        var shaderParams: Map<String, Float> = emptyMap()
+        var shaderParams: Map<String, Float> = emptyMap(),
+        // Per-port libretro RETRO_DEVICE_* override. Missing entry means "use core default
+        // (Joypad)". Keys are 0-indexed ports (P1=0). Values come from runner.getControllerTypes().
+        var portDeviceTypes: Map<Int, Int> = emptyMap(),
     ) {
         fun frontendEquals(other: Settings): Boolean =
             scalingMode == other.scalingMode &&
@@ -71,21 +72,21 @@ class OverrideManager(
             crtNoise == other.crtNoise &&
             shaderPreset == other.shaderPreset &&
             overlay == other.overlay &&
-            controllerTypeId == other.controllerTypeId &&
             coreOptions == other.coreOptions &&
-            shaderParams == other.shaderParams
+            shaderParams == other.shaderParams &&
+            portDeviceTypes == other.portDeviceTypes
     }
 
-    fun load(profileManager: ProfileManager): Settings {
+    fun load(): Settings {
         val settings = Settings()
         applyFrontend(platformFile, settings)
         applyOptions(platformFile, settings)
         applyShaderParams(platformFile, settings)
+        applyPortDeviceTypes(platformFile, settings)
         applyFrontend(gameFile, settings)
         applyOptions(gameFile, settings)
         applyShaderParams(gameFile, settings)
-        settings.profileName = profileManager.resolveProfile(platformTag, gameBaseName)
-        settings.controls = profileManager.readControls(settings.profileName)
+        applyPortDeviceTypes(gameFile, settings)
         resolveShortcutSource(settings)
         loadShortcutsFrom(sourceFile(settings.shortcutSource), settings)
         return settings
@@ -103,6 +104,7 @@ class OverrideManager(
         applyFrontend(platformFile, settings)
         applyOptions(platformFile, settings)
         applyShaderParams(platformFile, settings)
+        applyPortDeviceTypes(platformFile, settings)
         return settings
     }
 
@@ -115,6 +117,11 @@ class OverrideManager(
             existing["shader_params"] = settings.shaderParams.mapValues { it.value.toString() }
         } else {
             existing.remove("shader_params")
+        }
+        if (settings.portDeviceTypes.isNotEmpty()) {
+            existing["port_devices"] = portDeviceTypesToIni(settings.portDeviceTypes)
+        } else {
+            existing.remove("port_devices")
         }
         IniWriter.write(platformFile, existing)
     }
@@ -139,6 +146,18 @@ class OverrideManager(
         }
         if (shaderDelta.isNotEmpty()) existing["shader_params"] = shaderDelta
         else existing.remove("shader_params")
+
+        // Per-port device types: write only ports that differ from the platform baseline.
+        val portsDelta = mutableMapOf<Int, Int>()
+        val allPorts = settings.portDeviceTypes.keys + baseline.portDeviceTypes.keys
+        for (port in allPorts) {
+            val gameValue = settings.portDeviceTypes[port]
+            if (gameValue != null && gameValue != baseline.portDeviceTypes[port]) {
+                portsDelta[port] = gameValue
+            }
+        }
+        if (portsDelta.isNotEmpty()) existing["port_devices"] = portDeviceTypesToIni(portsDelta)
+        else existing.remove("port_devices")
 
         if (existing.any { it.value.isNotEmpty() }) IniWriter.write(gameFile, existing)
         else if (gameFile.exists()) gameFile.delete()
@@ -195,7 +214,6 @@ class OverrideManager(
         s["crt_noise"]?.toFloatOrNull()?.let { settings.crtNoise = it }
         s["shader_preset"]?.let { settings.shaderPreset = it }
         s["overlay"]?.let { settings.overlay = it }
-        s["controller_type"]?.toIntOrNull()?.let { settings.controllerTypeId = it }
     }
 
     private fun applyOptions(file: File, settings: Settings) {
@@ -219,6 +237,23 @@ class OverrideManager(
             settings.shaderParams = merged
         }
     }
+
+    private fun applyPortDeviceTypes(file: File, settings: Settings) {
+        if (!file.exists()) return
+        val s = IniParser.parse(file).getSection("port_devices")
+        if (s.isEmpty()) return
+        val merged = settings.portDeviceTypes.toMutableMap()
+        for ((key, value) in s) {
+            // Keys are like "p1".."p4"; convert to 0-indexed port int.
+            val portIdx = key.removePrefix("p").toIntOrNull()?.let { it - 1 } ?: continue
+            val typeId = value.toIntOrNull() ?: continue
+            merged[portIdx] = typeId
+        }
+        settings.portDeviceTypes = merged
+    }
+
+    private fun portDeviceTypesToIni(map: Map<Int, Int>): Map<String, String> =
+        map.entries.associate { (port, type) -> "p${port + 1}" to type.toString() }
 
     private fun loadShortcutsFrom(file: File, settings: Settings) {
         if (!file.exists()) return
@@ -252,7 +287,6 @@ class OverrideManager(
         "crt_noise" to settings.crtNoise.toString(),
         "shader_preset" to settings.shaderPreset,
         "overlay" to settings.overlay,
-        "controller_type" to settings.controllerTypeId.toString()
     )
 
     private fun buildFrontendDelta(settings: Settings, baseline: Settings): Map<String, String> {
@@ -273,7 +307,6 @@ class OverrideManager(
         if (settings.crtNoise != baseline.crtNoise) delta["crt_noise"] = settings.crtNoise.toString()
         if (settings.shaderPreset != baseline.shaderPreset) delta["shader_preset"] = settings.shaderPreset
         if (settings.overlay != baseline.overlay) delta["overlay"] = settings.overlay
-        if (settings.controllerTypeId != baseline.controllerTypeId) delta["controller_type"] = settings.controllerTypeId.toString()
         return delta
     }
 

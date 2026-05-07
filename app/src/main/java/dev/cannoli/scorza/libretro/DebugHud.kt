@@ -54,7 +54,7 @@ fun DebugHud(
                 audioSampleRate = audioSampleRate,
                 backendName = renderer.backendName
             )
-            delay(500)
+            delay(1000)
         }
     }
 

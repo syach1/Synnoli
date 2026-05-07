@@ -10,9 +10,6 @@ sealed class IGMScreen {
 
     data class Emulator(override val selectedIndex: Int = 0, val showDescription: Boolean = false) : IGMScreen()
     data class EmulatorCategory(override val selectedIndex: Int = 0, val categoryKey: String, val categoryTitle: String = "", val showDescription: Boolean = false) : IGMScreen()
-    data class Controls(override val selectedIndex: Int = 0, val menuOpen: Boolean = false, val menuIndex: Int = 0) : IGMScreen()
-    data class ControlEdit(override val selectedIndex: Int = 0, val listeningIndex: Int = -1, val listenCountdownMs: Int = 0, val revision: Int = 0) : IGMScreen()
-    data class ProfileName(override val selectedIndex: Int = 0, val name: String = "", val cursorPos: Int = 0, val keyRow: Int = 2, val keyCol: Int = 0, val caps: Boolean = false, val symbols: Boolean = false, val isNew: Boolean = true, val originalName: String = "") : IGMScreen()
     data class Shortcuts(override val selectedIndex: Int = 0, val listening: Boolean = false, val heldKeys: Set<Int> = emptySet(), val countdownMs: Int = 0) : IGMScreen()
     data class ShaderSettings(override val selectedIndex: Int = 0) : IGMScreen()
     data class SavePrompt(override val selectedIndex: Int = 0) : IGMScreen()
@@ -21,4 +18,26 @@ sealed class IGMScreen {
     data class AchievementDetail(override val selectedIndex: Int = 0, val achievement: AchievementInfo, val parentIndex: Int = 0) : IGMScreen()
     data class GuidePicker(override val selectedIndex: Int = 0) : IGMScreen()
     data class Guide(override val selectedIndex: Int = 0, val filePath: String, val page: Int = 0, val textZoom: Int = 1) : IGMScreen()
+
+    data class Controllers(override val selectedIndex: Int = 0) : IGMScreen()
+    /**
+     * In-game multi-controller seat reassignment. [selectedIndex] picks one of the four port
+     * rows. [swapWithIndex] is the row currently being held in 'swap mode' (set when the user
+     * confirmed on a row to start a swap; the next confirm picks the partner). -1 means idle.
+     */
+    data class ReassignPlayers(
+        override val selectedIndex: Int = 0,
+        val swapWithIndex: Int = -1,
+    ) : IGMScreen()
+    data class ControllerDetail(
+        override val selectedIndex: Int = 0,
+        val mappingId: String,
+        val androidDeviceId: Int? = null,
+    ) : IGMScreen()
+    data class EditButtons(
+        override val selectedIndex: Int = 0,
+        val mappingId: String,
+        val listeningCanonical: String? = null,
+        val countdownMs: Int = 0,
+    ) : IGMScreen()
 }

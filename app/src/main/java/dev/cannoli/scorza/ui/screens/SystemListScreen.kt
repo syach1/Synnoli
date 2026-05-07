@@ -13,10 +13,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -76,14 +78,18 @@ fun SystemListScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val itemHeight = pillItemHeight(listLineHeight, listVerticalPadding)
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = state.scrollTarget.coerceAtLeast(0))
+
+    DisposableEffect(Unit) {
+        onDispose { viewModel.savePosition(listState.firstVisibleItemIndex) }
+    }
 
     val recentlyPlayedLabel = stringResource(R.string.label_recently_played)
     val favoritesLabel = stringResource(R.string.label_favorites)
     val collectionsLabel = stringResource(R.string.label_collections)
 
     val selectedItem = state.items.getOrNull(state.selectedIndex)
-    val selectedGame = (selectedItem as? ListItem.GameItem)?.game
-    val artPath = selectedGame?.artFile?.absolutePath
+    val artPath = (selectedItem as? ListItem.GameItem)?.artFile?.absolutePath
     val selectedArt by produceState<ImageBitmap?>(null, artPath) {
         value = if (artPath != null) {
             withContext(Dispatchers.IO) {
@@ -160,6 +166,7 @@ fun SystemListScreen(
                     selectedIndex = state.selectedIndex,
                     itemHeight = itemHeight,
                     scrollTarget = state.scrollTarget,
+                    listState = listState,
                     reorderMode = state.reorderMode,
                     onVisibleRangeChanged = { first, count, full ->
                         viewModel.firstVisibleIndex = first
@@ -172,7 +179,7 @@ fun SystemListScreen(
                             is ListItem.CollectionsFolder -> "collections"
                             is ListItem.PlatformItem -> item.platform.tag
                             is ListItem.CollectionItem -> "col:${item.name}"
-                            is ListItem.GameItem -> "game:${item.game.file.absolutePath}"
+                            is ListItem.GameItem -> "game:${item.recentKey}"
                             is ListItem.ToolsFolder -> "tools"
                             is ListItem.PortsFolder -> "ports"
                         }
@@ -184,7 +191,7 @@ fun SystemListScreen(
                         is ListItem.CollectionsFolder -> collectionsLabel
                         is ListItem.PlatformItem -> item.platform.displayName
                         is ListItem.CollectionItem -> dev.cannoli.scorza.model.Collection.stemToDisplayName(item.name)
-                        is ListItem.GameItem -> item.game.displayName
+                        is ListItem.GameItem -> item.displayName
                         is ListItem.ToolsFolder -> item.name
                         is ListItem.PortsFolder -> item.name
                     }
@@ -234,8 +241,9 @@ fun SystemListScreen(
             }
             }
 
-            val hasResumeState = selectedGame != null && resumableGames.contains(selectedGame.file.absolutePath)
-            val playLabel = if (selectedGame != null) stringResource(R.string.label_play) else stringResource(R.string.label_select)
+            val selectedGameItem = selectedItem as? ListItem.GameItem
+            val hasResumeState = selectedGameItem != null && resumableGames.contains(selectedGameItem.recentKey)
+            val playLabel = if (selectedGameItem != null) stringResource(R.string.label_play) else stringResource(R.string.label_select)
             val resumeLabel = stringResource(R.string.label_resume)
             val rightItems = if (fiveGameHandheld) {
                 if (state.items.isEmpty()) {

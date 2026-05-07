@@ -30,16 +30,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.cannoli.igm.ShortcutAction
 import dev.cannoli.scorza.R
-import dev.cannoli.scorza.input.ProfileManager
-import dev.cannoli.scorza.libretro.ControlsScreen
-import dev.cannoli.scorza.libretro.LibretroInput
+import dev.cannoli.scorza.input.v2.runtime.confirmButton
+import dev.cannoli.scorza.input.v2.runtime.labelSet
 import dev.cannoli.scorza.ui.LocalPortraitMargin
+import dev.cannoli.scorza.util.keyCodeName
 import dev.cannoli.scorza.ui.PortraitMarginState
+import dev.cannoli.scorza.ui.components.CREDITS
 import dev.cannoli.scorza.ui.components.CreditsOverlay
 import dev.cannoli.scorza.ui.components.DialogOverlay
 import dev.cannoli.scorza.ui.components.ListDialogScreen
 import dev.cannoli.scorza.ui.effectivePortraitMarginDp
 import dev.cannoli.scorza.ui.screens.ColorEntry
+import dev.cannoli.scorza.ui.screens.ControllerDetailScreen
+import dev.cannoli.scorza.ui.screens.ControllersScreen
+import dev.cannoli.scorza.ui.screens.EditButtonsScreen
 import dev.cannoli.scorza.ui.screens.CoreMappingEntry
 import dev.cannoli.scorza.ui.screens.CorePickerOption
 import dev.cannoli.scorza.ui.screens.DialogState
@@ -47,22 +51,23 @@ import dev.cannoli.scorza.ui.screens.DirectoryBrowserScreen
 import dev.cannoli.scorza.ui.screens.GameListScreen
 import dev.cannoli.scorza.ui.screens.InputTesterScreen
 import dev.cannoli.scorza.ui.screens.InstallingScreen
+import dev.cannoli.scorza.ui.screens.LoggingSettingsScreen
 import dev.cannoli.scorza.ui.screens.KeyboardInputState
 import dev.cannoli.scorza.ui.screens.PortraitMarginOverlay
 import dev.cannoli.scorza.ui.screens.SettingsScreen
 import dev.cannoli.scorza.ui.screens.SetupScreen
 import dev.cannoli.scorza.ui.screens.SystemListScreen
 import dev.cannoli.scorza.ui.screens.isFullScreen
+import dev.cannoli.scorza.ui.viewmodel.ControllersViewModel
 import dev.cannoli.scorza.ui.viewmodel.GameListViewModel
 import dev.cannoli.scorza.ui.viewmodel.InputTesterViewModel
 import dev.cannoli.scorza.ui.viewmodel.SettingsViewModel
 import dev.cannoli.scorza.ui.viewmodel.SystemListViewModel
 import dev.cannoli.ui.ELLIPSIS
-import dev.cannoli.ui.components.ConfirmOverlay
 import dev.cannoli.ui.components.List
 import dev.cannoli.ui.components.LocalStatusBarLeftEdge
 import dev.cannoli.ui.components.MessageOverlay
-import dev.cannoli.ui.components.OsdPill
+import dev.cannoli.ui.components.OsdHost
 import dev.cannoli.ui.components.PillRowKeyValue
 import dev.cannoli.ui.components.PillRowText
 import dev.cannoli.ui.components.StatusBar
@@ -81,28 +86,96 @@ import kotlinx.coroutines.flow.StateFlow
 enum class BrowsePurpose { SD_ROOT, ROM_DIRECTORY, SETUP }
 
 sealed class LauncherScreen {
+    interface ScrollableScreen {
+        val selectedIndex: Int
+        val scrollTarget: Int
+        val itemCount: Int
+        fun withScroll(selectedIndex: Int, scrollTarget: Int): LauncherScreen
+    }
+
     data object SystemList : LauncherScreen()
     data object GameList : LauncherScreen()
     data object Settings : LauncherScreen()
     data object InputTester : LauncherScreen()
-    data class CoreMapping(val mappings: List<CoreMappingEntry>, val allMappings: List<CoreMappingEntry> = mappings, val selectedIndex: Int = 0, val scrollTarget: Int = 0, val filter: Int = 0) : LauncherScreen()
-    data class CorePicker(val tag: String, val platformName: String, val cores: List<CorePickerOption>, val selectedIndex: Int = 0, val gamePath: String? = null, val scrollTarget: Int = 0, val activeIndex: Int = 0) : LauncherScreen()
-    data class ColorList(val colors: List<ColorEntry>, val selectedIndex: Int = 0, val scrollTarget: Int = 0) : LauncherScreen()
-    data class CollectionPicker(val gamePaths: List<String>, val title: String, val collections: List<String>, val displayNames: List<String> = emptyList(), val selectedIndex: Int = 0, val checkedIndices: Set<Int> = emptySet(), val initialChecked: Set<Int> = emptySet(), val scrollTarget: Int = 0) : LauncherScreen()
-    data class AppPicker(val type: String, val title: String, val apps: List<String>, val packages: List<String>, val selectedIndex: Int = 0, val checkedIndices: Set<Int> = emptySet(), val initialChecked: Set<Int> = emptySet(), val scrollTarget: Int = 0) : LauncherScreen()
-    data class ChildPicker(val collectionName: String, val collections: List<String>, val displayNames: List<String> = emptyList(), val selectedIndex: Int = 0, val checkedIndices: Set<Int> = emptySet(), val initialChecked: Set<Int> = emptySet(), val scrollTarget: Int = 0) : LauncherScreen()
-    data class ProfileList(val profiles: List<String> = emptyList(), val selectedIndex: Int = 0, val scrollTarget: Int = 0) : LauncherScreen()
-    data class ControlBinding(val selectedIndex: Int = 0, val scrollTarget: Int = 0, val controls: Map<String, Int> = emptyMap(), val listeningIndex: Int = -1, val listenCountdownMs: Int = 0, val profileName: String = ProfileManager.DEFAULT_GAME) : LauncherScreen()
-    data class ShortcutBinding(val selectedIndex: Int = 0, val scrollTarget: Int = 0, val shortcuts: Map<ShortcutAction, Set<Int>> = emptyMap(), val listening: Boolean = false, val heldKeys: Set<Int> = emptySet(), val countdownMs: Int = 0) : LauncherScreen()
-    data class Credits(val selectedIndex: Int = 0, val scrollTarget: Int = 0) : LauncherScreen()
-    data class InstalledCores(val cores: List<String> = emptyList(), val loading: Boolean = true, val selectedIndex: Int = 0, val scrollTarget: Int = 0, val title: String? = null) : LauncherScreen()
+    data class CoreMapping(val mappings: List<CoreMappingEntry>, val allMappings: List<CoreMappingEntry> = mappings, override val selectedIndex: Int = 0, override val scrollTarget: Int = 0, val filter: Int = 0) : LauncherScreen(), ScrollableScreen {
+        override val itemCount: Int get() = mappings.size
+        override fun withScroll(selectedIndex: Int, scrollTarget: Int) = copy(selectedIndex = selectedIndex, scrollTarget = scrollTarget)
+    }
+    data class CorePicker(val tag: String, val platformName: String, val cores: List<CorePickerOption>, override val selectedIndex: Int = 0, val gamePath: String? = null, override val scrollTarget: Int = 0, val activeIndex: Int = 0) : LauncherScreen(), ScrollableScreen {
+        override val itemCount: Int get() = cores.size
+        override fun withScroll(selectedIndex: Int, scrollTarget: Int) = copy(selectedIndex = selectedIndex, scrollTarget = scrollTarget)
+    }
+    data class ColorList(val colors: List<ColorEntry>, override val selectedIndex: Int = 0, override val scrollTarget: Int = 0) : LauncherScreen(), ScrollableScreen {
+        override val itemCount: Int get() = colors.size
+        override fun withScroll(selectedIndex: Int, scrollTarget: Int) = copy(selectedIndex = selectedIndex, scrollTarget = scrollTarget)
+    }
+    data class CollectionPicker(val gamePaths: List<String>, val title: String, val collections: List<String>, val displayNames: List<String> = emptyList(), override val selectedIndex: Int = 0, val checkedIndices: Set<Int> = emptySet(), val initialChecked: Set<Int> = emptySet(), override val scrollTarget: Int = 0) : LauncherScreen(), ScrollableScreen {
+        override val itemCount: Int get() = collections.size
+        override fun withScroll(selectedIndex: Int, scrollTarget: Int) = copy(selectedIndex = selectedIndex, scrollTarget = scrollTarget)
+    }
+    data class AppPicker(val type: String, val title: String, val apps: List<String>, val packages: List<String>, override val selectedIndex: Int = 0, val checkedIndices: Set<Int> = emptySet(), val initialChecked: Set<Int> = emptySet(), override val scrollTarget: Int = 0) : LauncherScreen(), ScrollableScreen {
+        override val itemCount: Int get() = apps.size
+        override fun withScroll(selectedIndex: Int, scrollTarget: Int) = copy(selectedIndex = selectedIndex, scrollTarget = scrollTarget)
+    }
+    data class ChildPicker(val collectionName: String, val collections: List<String>, val displayNames: List<String> = emptyList(), override val selectedIndex: Int = 0, val checkedIndices: Set<Int> = emptySet(), val initialChecked: Set<Int> = emptySet(), override val scrollTarget: Int = 0) : LauncherScreen(), ScrollableScreen {
+        override val itemCount: Int get() = collections.size
+        override fun withScroll(selectedIndex: Int, scrollTarget: Int) = copy(selectedIndex = selectedIndex, scrollTarget = scrollTarget)
+    }
+    data class Controllers(
+        override val selectedIndex: Int = 0,
+        override val scrollTarget: Int = 0,
+    ) : LauncherScreen(), ScrollableScreen {
+        override val itemCount: Int get() = 0
+        override fun withScroll(selectedIndex: Int, scrollTarget: Int) = copy(selectedIndex = selectedIndex, scrollTarget = scrollTarget)
+    }
+    data class ControllerDetail(
+        val mappingId: String,
+        val androidDeviceId: Int? = null,
+        override val selectedIndex: Int = 0,
+        override val scrollTarget: Int = 0,
+    ) : LauncherScreen(), ScrollableScreen {
+        override val itemCount: Int get() = 5
+        override fun withScroll(selectedIndex: Int, scrollTarget: Int) = copy(selectedIndex = selectedIndex, scrollTarget = scrollTarget)
+    }
+    data class EditButtons(
+        val mappingId: String,
+        val listeningCanonical: dev.cannoli.scorza.input.v2.CanonicalButton? = null,
+        val countdownMs: Int = 0,
+        override val selectedIndex: Int = 0,
+        override val scrollTarget: Int = 0,
+    ) : LauncherScreen(), ScrollableScreen {
+        override val itemCount: Int get() = dev.cannoli.scorza.input.v2.CanonicalButton.entries.size
+        override fun withScroll(selectedIndex: Int, scrollTarget: Int) = copy(selectedIndex = selectedIndex, scrollTarget = scrollTarget)
+    }
+    data class LoggingSettings(
+        override val selectedIndex: Int = 0,
+        override val scrollTarget: Int = 0,
+    ) : LauncherScreen(), ScrollableScreen {
+        override val itemCount: Int get() = dev.cannoli.scorza.util.LoggingPrefs.Category.entries.size
+        override fun withScroll(selectedIndex: Int, scrollTarget: Int) = copy(selectedIndex = selectedIndex, scrollTarget = scrollTarget)
+    }
+    data class ShortcutBinding(override val selectedIndex: Int = 0, override val scrollTarget: Int = 0, val shortcuts: Map<ShortcutAction, Set<Int>> = emptyMap(), val listening: Boolean = false, val heldKeys: Set<Int> = emptySet(), val countdownMs: Int = 0) : LauncherScreen(), ScrollableScreen {
+        override val itemCount: Int get() = ShortcutAction.entries.size
+        override fun withScroll(selectedIndex: Int, scrollTarget: Int) = copy(selectedIndex = selectedIndex, scrollTarget = scrollTarget)
+    }
+    data class Credits(override val selectedIndex: Int = 0, override val scrollTarget: Int = 0) : LauncherScreen(), ScrollableScreen {
+        override val itemCount: Int get() = CREDITS.size
+        override fun withScroll(selectedIndex: Int, scrollTarget: Int) = copy(selectedIndex = selectedIndex, scrollTarget = scrollTarget)
+    }
+    data class InstalledCores(val cores: List<String> = emptyList(), val loading: Boolean = true, override val selectedIndex: Int = 0, override val scrollTarget: Int = 0, val title: String? = null) : LauncherScreen(), ScrollableScreen {
+        override val itemCount: Int get() = cores.size
+        override fun withScroll(selectedIndex: Int, scrollTarget: Int) = copy(selectedIndex = selectedIndex, scrollTarget = scrollTarget)
+    }
     data class DirectoryBrowser(
         val purpose: BrowsePurpose,
         val currentPath: String,
         val entries: List<String> = emptyList(),
-        val selectedIndex: Int = 0,
-        val scrollTarget: Int = 0
-    ) : LauncherScreen()
+        override val selectedIndex: Int = 0,
+        override val scrollTarget: Int = 0
+    ) : LauncherScreen(), ScrollableScreen {
+        override val itemCount: Int get() = entries.size + if (currentPath != "/storage/") 1 else 0
+        override fun withScroll(selectedIndex: Int, scrollTarget: Int) = copy(selectedIndex = selectedIndex, scrollTarget = scrollTarget)
+    }
     data class Setup(
         val volumes: List<Pair<String, String>> = emptyList(),
         val volumeIndex: Int = 0,
@@ -115,6 +188,11 @@ sealed class LauncherScreen {
         val statusLabel: String = "Kneading the dough$ELLIPSIS",
         val finished: Boolean = false
     ) : LauncherScreen()
+    data class Housekeeping(
+        val kind: dev.cannoli.scorza.ui.screens.HousekeepingKind,
+        val progress: Float = 0f,
+        val statusLabel: String = "",
+    ) : LauncherScreen()
 }
 
 @Composable
@@ -125,13 +203,18 @@ fun AppNavGraph(
     inputTesterViewModel: InputTesterViewModel,
     onExitInputTester: () -> Unit = {},
     settingsViewModel: SettingsViewModel,
+    controllersViewModel: ControllersViewModel,
     dialogState: StateFlow<DialogState>,
     onVisibleRangeChanged: (firstVisible: Int, visibleCount: Int, isViewportFull: Boolean) -> Unit = { _, _, _ -> },
     resumableGames: Set<String> = emptySet(),
     updateAvailable: Boolean = false,
     downloadProgress: Float = 0f,
     downloadError: String? = null,
-    osdMessage: String? = null,
+    osdController: dev.cannoli.ui.components.OsdController,
+    activeMapping: dev.cannoli.scorza.input.v2.DeviceMapping? = null,
+    mappingRepository: dev.cannoli.scorza.input.v2.repo.MappingRepository? = null,
+    editButtonsController: dev.cannoli.scorza.input.EditButtonsController? = null,
+    nav: dev.cannoli.scorza.navigation.NavigationController? = null,
 ) {
     val dialog by dialogState.collectAsState()
     val appSettings by settingsViewModel.appSettings.collectAsState()
@@ -140,14 +223,19 @@ fun AppNavGraph(
     val listLineHeight = (appSettings.textSize.sp + 10).sp
     val listVerticalPadding = 6.dp
 
-    val labels = dev.cannoli.ui.ButtonStyle(appSettings.buttonLabelSet, appSettings.confirmButton)
+    val labels = dev.cannoli.ui.ButtonStyle(
+        activeMapping.labelSet(dev.cannoli.ui.ButtonLabelSet.PLUMBER),
+        activeMapping.confirmButton(),
+    )
 
     val cannoliColors = CannoliColors(
         highlight = appSettings.colorHighlight,
         text = appSettings.colorText,
         highlightText = appSettings.colorHighlightText,
         accent = appSettings.colorAccent,
-        title = appSettings.colorTitle
+        title = appSettings.colorTitle,
+        background = appSettings.colorBackground,
+        statusBar = appSettings.colorStatusBar
     )
 
     val itemHeight = pillItemHeight(listLineHeight, listVerticalPadding)
@@ -484,80 +572,6 @@ fun AppNavGraph(
                     }
                 }
             }
-            is LauncherScreen.ProfileList -> {
-                ListDialogScreen(
-                    backgroundImagePath = appSettings.backgroundImagePath,
-                    backgroundTint = appSettings.backgroundTint,
-                    title = stringResource(R.string.title_profiles),
-                    listFontSize = listFontSize,
-                    listLineHeight = listLineHeight,
-                    rightBottomItems = listOf(labels.north to stringResource(R.string.label_new), labels.confirm to stringResource(R.string.label_edit)),
-                    buttonStyle = labels
-                ) {
-                    List(
-                        items = currentScreen.profiles,
-                        selectedIndex = currentScreen.selectedIndex,
-                        itemHeight = itemHeight,
-                        scrollTarget = currentScreen.scrollTarget,
-                        onVisibleRangeChanged = onVisibleRangeChanged
-                    ) { _, name, isSelected ->
-                        PillRowText(
-                            label = name,
-                            isSelected = isSelected,
-                            fontSize = listFontSize,
-                            lineHeight = listLineHeight,
-                            verticalPadding = listVerticalPadding
-                        )
-                    }
-                }
-                if (dialog is DialogState.DeleteProfileConfirm) {
-                    ConfirmOverlay(message = stringResource(R.string.dialog_delete_profile, (dialog as DialogState.DeleteProfileConfirm).profileName))
-                }
-                if (dialog.isFullScreen) {
-                    DialogOverlay(
-                        dialogState = dialog,
-                        backgroundImagePath = appSettings.backgroundImagePath,
-                        backgroundTint = appSettings.backgroundTint,
-                        listFontSize = listFontSize,
-                        listLineHeight = listLineHeight,
-                        listVerticalPadding = listVerticalPadding,
-                        buttonStyle = labels
-                    )
-                }
-            }
-            is LauncherScreen.ControlBinding -> {
-                val tempInput = remember(currentScreen.controls) {
-                    LibretroInput().also { input ->
-                        for ((key, keyCode) in currentScreen.controls) {
-                            val btn = input.buttons.find { it.prefKey == key } ?: continue
-                            input.assign(btn, keyCode)
-                        }
-                    }
-                }
-                val selectedBtn = tempInput.buttons.getOrNull(currentScreen.selectedIndex)
-                val canUnmap = selectedBtn != null
-                        && selectedBtn.prefKey != "btn_menu"
-                        && tempInput.getKeyCodeFor(selectedBtn) != LibretroInput.UNMAPPED
-                        && currentScreen.listeningIndex < 0
-                val swapConfirmBack = appSettings.confirmButton == dev.cannoli.ui.ConfirmButton.EAST
-                val isNavProfile = currentScreen.profileName == ProfileManager.NAVIGATION
-                ControlsScreen(
-                    input = tempInput,
-                    selectedIndex = currentScreen.selectedIndex,
-                    listeningIndex = currentScreen.listeningIndex,
-                    listenCountdownMs = currentScreen.listenCountdownMs,
-                    titleRes = R.string.title_button_mapping,
-                    canUnmapSelected = canUnmap,
-                    labelSuffix = { btn ->
-                        if (!isNavProfile) null
-                        else when (btn.prefKey) {
-                            "btn_south" -> if (swapConfirmBack) "(Back)" else "(Confirm)"
-                            "btn_east" -> if (swapConfirmBack) "(Confirm)" else "(Back)"
-                            else -> null
-                        }
-                    }
-                )
-            }
             is LauncherScreen.ShortcutBinding -> {
                 ListDialogScreen(
                     backgroundImagePath = appSettings.backgroundImagePath,
@@ -580,7 +594,7 @@ fun AppNavGraph(
                     ) { _, action, isSelected ->
                         val chord = currentScreen.shortcuts[action]
                         val value = if (chord.isNullOrEmpty()) stringResource(R.string.value_none)
-                        else chord.joinToString(" + ") { LibretroInput.keyCodeName(it) }
+                        else chord.joinToString(" + ") { keyCodeName(it) }
                         PillRowKeyValue(
                             label = stringResource(action.labelRes),
                             value = value,
@@ -615,7 +629,7 @@ fun AppNavGraph(
                             Spacer(modifier = Modifier.height(Spacing.Sm))
                             Text(
                                 text = if (currentScreen.heldKeys.isEmpty()) stringResource(R.string.shortcut_hold_prompt)
-                                else currentScreen.heldKeys.joinToString(" + ") { LibretroInput.keyCodeName(it) },
+                                else currentScreen.heldKeys.joinToString(" + ") { keyCodeName(it) },
                                 style = MaterialTheme.typography.bodyMedium.copy(
                                     fontSize = 16.sp,
                                     color = colors.text.copy(alpha = 0.6f)
@@ -730,6 +744,13 @@ fun AppNavGraph(
                     finished = currentScreen.finished
                 )
             }
+            is LauncherScreen.Housekeeping -> {
+                dev.cannoli.scorza.ui.screens.HousekeepingScreen(
+                    kind = currentScreen.kind,
+                    progress = currentScreen.progress,
+                    statusLabel = currentScreen.statusLabel,
+                )
+            }
             is LauncherScreen.Credits -> {
                 CreditsOverlay(
                     selectedIndex = currentScreen.selectedIndex,
@@ -742,6 +763,96 @@ fun AppNavGraph(
                     onVisibleRangeChanged = onVisibleRangeChanged
                 )
             }
+            is LauncherScreen.Controllers -> ControllersScreen(
+                screen = currentScreen,
+                viewModel = controllersViewModel,
+                modifier = Modifier.fillMaxSize(),
+                backgroundImagePath = appSettings.backgroundImagePath,
+                backgroundTint = appSettings.backgroundTint,
+                listFontSize = listFontSize,
+                listLineHeight = listLineHeight,
+                listVerticalPadding = listVerticalPadding,
+                buttonStyle = labels,
+            )
+            is LauncherScreen.ControllerDetail -> {
+                val controllersState by controllersViewModel.state.collectAsState()
+                val mapping = controllersState.connected.firstOrNull { it.mapping.id == currentScreen.mappingId }?.mapping
+                    ?: controllersState.savedMappings.firstOrNull { it.id == currentScreen.mappingId }
+                ControllerDetailScreen(
+                    screen = currentScreen,
+                    mapping = mapping,
+                    modifier = Modifier.fillMaxSize(),
+                    backgroundImagePath = appSettings.backgroundImagePath,
+                    backgroundTint = appSettings.backgroundTint,
+                    listFontSize = listFontSize,
+                    listLineHeight = listLineHeight,
+                    listVerticalPadding = listVerticalPadding,
+                    buttonStyle = labels,
+                )
+                if (dialog.isFullScreen) {
+                    DialogOverlay(
+                        dialogState = dialog,
+                        backgroundImagePath = appSettings.backgroundImagePath,
+                        backgroundTint = appSettings.backgroundTint,
+                        listFontSize = listFontSize,
+                        listLineHeight = listLineHeight,
+                        listVerticalPadding = listVerticalPadding,
+                        buttonStyle = labels
+                    )
+                }
+            }
+            is LauncherScreen.EditButtons -> {
+                val editState by controllersViewModel.state.collectAsState()
+                val mapping = editState.connected.firstOrNull { it.mapping.id == currentScreen.mappingId }?.mapping
+                    ?: editState.savedMappings.firstOrNull { it.id == currentScreen.mappingId }
+                    ?: mappingRepository?.findById(currentScreen.mappingId)
+                if (editButtonsController != null && nav != null) {
+                    androidx.compose.runtime.LaunchedEffect(currentScreen.listeningCanonical) {
+                        if (currentScreen.listeningCanonical != null) {
+                            val startedAt = System.currentTimeMillis()
+                            while (currentScreen.listeningCanonical != null) {
+                                kotlinx.coroutines.delay(50)
+                                val finalized = editButtonsController.tickAndMaybeFinalize()
+                                if (finalized != null || !editButtonsController.isListening) {
+                                    val cs = nav.currentScreen
+                                    if (cs is LauncherScreen.EditButtons) {
+                                        nav.replaceTop(cs.copy(listeningCanonical = null, countdownMs = 0))
+                                    }
+                                    break
+                                }
+                                val cs = nav.currentScreen
+                                if (cs is LauncherScreen.EditButtons && cs.listeningCanonical != null) {
+                                    val elapsed = (System.currentTimeMillis() - startedAt).toInt()
+                                    if (cs.countdownMs != elapsed) {
+                                        nav.replaceTop(cs.copy(countdownMs = elapsed))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                EditButtonsScreen(
+                    screen = currentScreen,
+                    mapping = mapping,
+                    modifier = Modifier.fillMaxSize(),
+                    backgroundImagePath = appSettings.backgroundImagePath,
+                    backgroundTint = appSettings.backgroundTint,
+                    listFontSize = listFontSize,
+                    listLineHeight = listLineHeight,
+                    listVerticalPadding = listVerticalPadding,
+                    buttonStyle = labels,
+                )
+            }
+            is LauncherScreen.LoggingSettings -> LoggingSettingsScreen(
+                screen = currentScreen,
+                modifier = Modifier.fillMaxSize(),
+                backgroundImagePath = appSettings.backgroundImagePath,
+                backgroundTint = appSettings.backgroundTint,
+                listFontSize = listFontSize,
+                listLineHeight = listLineHeight,
+                listVerticalPadding = listVerticalPadding,
+                buttonStyle = labels,
+            )
         }
 
         val systemListState = systemListViewModel?.state?.collectAsState()?.value
@@ -753,6 +864,7 @@ fun AppNavGraph(
                 || currentScreen is LauncherScreen.DirectoryBrowser
                 || currentScreen is LauncherScreen.Setup
                 || currentScreen is LauncherScreen.Installing
+                || currentScreen is LauncherScreen.Housekeeping
                 || currentScreen is LauncherScreen.InputTester
                 || (currentScreen is LauncherScreen.SystemList && systemListState?.isLoading == true)
         val hasContent = dev.cannoli.scorza.server.KitchenManager.isRunning
@@ -760,7 +872,7 @@ fun AppNavGraph(
                 || appSettings.showBluetooth
                 || appSettings.showVpn
                 || appSettings.showClock
-                || appSettings.showBattery
+                || appSettings.batteryDisplay != dev.cannoli.scorza.settings.BatteryDisplay.HIDE
                 || (updateAvailable && appSettings.showUpdate)
         if (!hideForDialog && !hideForScreen && hasContent) {
         Box(
@@ -777,7 +889,8 @@ fun AppNavGraph(
                 showBluetooth = appSettings.showBluetooth,
                 showVpn = appSettings.showVpn,
                 showClock = appSettings.showClock,
-                showBattery = appSettings.showBattery,
+                showBattery = appSettings.batteryDisplay != dev.cannoli.scorza.settings.BatteryDisplay.HIDE,
+                batteryIconOnly = appSettings.batteryDisplay == dev.cannoli.scorza.settings.BatteryDisplay.ICON,
                 showUpdate = appSettings.showUpdate,
                 use24hTime = appSettings.use24h
             )
@@ -791,9 +904,7 @@ fun AppNavGraph(
     if (onPortraitMarginRow && appSettings.portraitMarginPx > 0) {
         PortraitMarginOverlay(marginPx = appSettings.portraitMarginPx)
     }
-    if (osdMessage != null) {
-        OsdPill(message = osdMessage)
-    }
+    OsdHost(controller = osdController)
     }
     }
 }
