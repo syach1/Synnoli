@@ -121,9 +121,7 @@ fun LibretroScreen(
     gameInfo: GameInfo = GameInfo("", "", null),
     activeMapping: dev.cannoli.scorza.input.v2.DeviceMapping? = null,
     controllersViewModel: dev.cannoli.scorza.ui.viewmodel.ControllersViewModel? = null,
-    mappingRepository: dev.cannoli.scorza.input.v2.repo.MappingRepository? = null,
-    editButtonsController: dev.cannoli.scorza.input.EditButtonsController? = null,
-    onClearListening: () -> Unit = {},
+    inputRemapHasChanges: Boolean = false,
 ) {
     val overlayVisible = screen != null
     val showDescription = when (screen) {
@@ -213,7 +211,8 @@ fun LibretroScreen(
             is IGMScreen.Settings, is IGMScreen.Video, is IGMScreen.Advanced,
             is IGMScreen.ShaderSettings,
             is IGMScreen.Emulator, is IGMScreen.EmulatorCategory,
-            is IGMScreen.Shortcuts, is IGMScreen.SavePrompt -> {
+            is IGMScreen.Shortcuts, is IGMScreen.SavePrompt,
+            is IGMScreen.Buttons -> {
                 val description = if (showDescription) {
                     settingsItems.getOrNull(screen.selectedIndex)?.hint
                 } else null
@@ -233,6 +232,10 @@ fun LibretroScreen(
                     screen is IGMScreen.Video -> listOf(labels.confirm to selectLabel)
                     screen is IGMScreen.Advanced -> emptyList()
                     screen is IGMScreen.ShaderSettings -> emptyList()
+                    screen is IGMScreen.Buttons -> listOf(
+                        labels.north to stringResource(R.string.label_clear),
+                        labels.confirm to stringResource(R.string.label_press),
+                    )
                     else -> listOf(labels.confirm to selectLabel)
                 }
                 val emulatorLabel = stringResource(R.string.igm_emulator)
@@ -245,10 +248,14 @@ fun LibretroScreen(
                     is IGMScreen.EmulatorCategory -> screen.categoryTitle.ifEmpty { emulatorLabel }
                     is IGMScreen.Shortcuts -> stringResource(R.string.title_shortcuts)
                     is IGMScreen.SavePrompt -> stringResource(R.string.igm_save_changes)
+                    is IGMScreen.Buttons -> stringResource(R.string.igm_buttons)
                     else -> stringResource(R.string.igm_settings)
                 }
                 val bottomBarLeft = buildList {
                     add(labels.back to stringResource(R.string.label_back))
+                    if (screen is IGMScreen.Buttons && inputRemapHasChanges) {
+                        add(labels.west to stringResource(R.string.label_reset_all))
+                    }
                     if (showsCycleHint) add(DPAD_HORIZONTAL to changeLabel)
                 }
                 IGMSettingsScreen(
@@ -464,79 +471,6 @@ fun LibretroScreen(
                         )
                     }
                 }
-            }
-            is IGMScreen.Controllers -> {
-                if (controllersViewModel != null) {
-                    dev.cannoli.scorza.ui.screens.ControllersScreen(
-                        screen = dev.cannoli.scorza.navigation.LauncherScreen.Controllers(selectedIndex = screen.selectedIndex),
-                        viewModel = controllersViewModel,
-                        modifier = Modifier.fillMaxSize(),
-                        backgroundAlpha = 0.75f,
-                        backgroundColor = Color.Black,
-                        listFontSize = igmFontSize,
-                        listLineHeight = igmLineHeight,
-                        buttonStyle = labels,
-                    )
-                }
-            }
-            is IGMScreen.ControllerDetail -> {
-                if (controllersViewModel != null) {
-                    val controllersState = controllersViewModel.state.collectAsState().value
-                    val mapping = controllersState.connected.firstOrNull { it.mapping.id == screen.mappingId }?.mapping
-                        ?: controllersState.savedMappings.firstOrNull { it.id == screen.mappingId }
-                    dev.cannoli.scorza.ui.screens.ControllerDetailScreen(
-                        screen = dev.cannoli.scorza.navigation.LauncherScreen.ControllerDetail(
-                            mappingId = screen.mappingId,
-                            androidDeviceId = screen.androidDeviceId,
-                            selectedIndex = screen.selectedIndex,
-                        ),
-                        mapping = mapping,
-                        modifier = Modifier.fillMaxSize(),
-                        backgroundAlpha = 0.75f,
-                        backgroundColor = Color.Black,
-                        listFontSize = igmFontSize,
-                        listLineHeight = igmLineHeight,
-                        buttonStyle = labels,
-                    )
-                }
-            }
-            is IGMScreen.EditButtons -> {
-                val parsedListening = screen.listeningCanonical?.let { name ->
-                    runCatching { dev.cannoli.scorza.input.v2.CanonicalButton.valueOf(name) }.getOrNull()
-                }
-                val ebState = controllersViewModel?.state?.collectAsState()?.value
-                val mapping = ebState?.connected?.firstOrNull { it.mapping.id == screen.mappingId }?.mapping
-                    ?: ebState?.savedMappings?.firstOrNull { it.id == screen.mappingId }
-                    ?: mappingRepository?.findById(screen.mappingId)
-                if (editButtonsController != null) {
-                    LaunchedEffect(screen.listeningCanonical) {
-                        if (parsedListening != null) {
-                            while (true) {
-                                kotlinx.coroutines.delay(50)
-                                val finalized = editButtonsController.tickAndMaybeFinalize()
-                                if (finalized != null || !editButtonsController.isListening) {
-                                    onClearListening()
-                                    break
-                                }
-                            }
-                        }
-                    }
-                }
-                dev.cannoli.scorza.ui.screens.EditButtonsScreen(
-                    screen = dev.cannoli.scorza.navigation.LauncherScreen.EditButtons(
-                        mappingId = screen.mappingId,
-                        listeningCanonical = parsedListening,
-                        countdownMs = screen.countdownMs,
-                        selectedIndex = screen.selectedIndex,
-                    ),
-                    mapping = mapping,
-                    modifier = Modifier.fillMaxSize(),
-                    backgroundAlpha = 0.75f,
-                    backgroundColor = Color.Black,
-                    listFontSize = igmFontSize,
-                    listLineHeight = igmLineHeight,
-                    buttonStyle = labels,
-                )
             }
             is IGMScreen.ReassignPlayers -> {
                 val controllersState = controllersViewModel?.state?.collectAsState()?.value

@@ -66,8 +66,6 @@ class LibretroActivity : ComponentActivity() {
     @Inject lateinit var controllerV2Bridge: dev.cannoli.scorza.input.v2.runtime.ControllerV2Bridge
     @Inject lateinit var activeMappingHolder: dev.cannoli.scorza.input.v2.runtime.ActiveMappingHolder
     @Inject lateinit var controllersViewModel: dev.cannoli.scorza.ui.viewmodel.ControllersViewModel
-    @Inject lateinit var editButtonsController: dev.cannoli.scorza.input.EditButtonsController
-    @Inject lateinit var mappingRepository: dev.cannoli.scorza.input.v2.repo.MappingRepository
     @Inject lateinit var bindingController: dev.cannoli.scorza.input.BindingController
 
     private lateinit var runner: LibretroRunner
@@ -130,6 +128,12 @@ class LibretroActivity : ComponentActivity() {
     private var controllerTypes by mutableStateOf(emptyList<LibretroRunner.ControllerType>())
     private var controllerTypeIndex by mutableIntStateOf(0)
     private var portDeviceTypes by mutableStateOf<Map<Int, Int>>(emptyMap())
+
+    @Volatile
+    private var activeInputRemap: Map<dev.cannoli.scorza.input.v2.CanonicalButton, Int> = emptyMap()
+
+    private var inputRemap by mutableStateOf<Map<dev.cannoli.scorza.input.v2.CanonicalButton, Int>>(emptyMap())
+
     private var shortcutSource by mutableStateOf(OverrideSource.GLOBAL)
     private var shortcuts by mutableStateOf(mapOf<ShortcutAction, Set<Int>>())
     private val shortcutChordKeys = mutableSetOf<Int>()
@@ -495,14 +499,7 @@ class LibretroActivity : ComponentActivity() {
                                 ),
                                 activeMapping = activeMappingHolder.active.collectAsState().value,
                                 controllersViewModel = controllersViewModel,
-                                mappingRepository = mappingRepository,
-                                editButtonsController = editButtonsController,
-                                onClearListening = {
-                                    val cs = currentScreen
-                                    if (cs is IGMScreen.EditButtons) {
-                                        replaceTop(cs.copy(listeningCanonical = null))
-                                    }
-                                },
+                                inputRemapHasChanges = inputRemap.isNotEmpty(),
                             )
                             if (!revealed) {
                                 Box(modifier = Modifier.fillMaxSize().background(Color.Black))
@@ -826,13 +823,6 @@ class LibretroActivity : ComponentActivity() {
     }
 
     override fun dispatchGenericMotionEvent(event: android.view.MotionEvent): Boolean {
-        val csForListen = currentScreen
-        if (csForListen is IGMScreen.EditButtons && editButtonsController.isListening) {
-            val axes = listOf(0, 1, 11, 14, 15, 16, 17, 18, 22, 23)
-            val axisValues = axes.associateWith { event.getAxisValue(it) }
-            editButtonsController.captureRawAxisEvent(axisValues)
-            return true
-        }
         if (loading) return super.dispatchGenericMotionEvent(event)
         val source = event.source
         val isJoystick = source and android.view.InputDevice.SOURCE_JOYSTICK == android.view.InputDevice.SOURCE_JOYSTICK ||
@@ -895,9 +885,10 @@ class LibretroActivity : ComponentActivity() {
             runner.setInput(port, 0)
             return
         }
+        val remap = activeInputRemap
         var mask = 0
         for (cb in eval.currentlyPressed()) {
-            mask = mask or dev.cannoli.scorza.input.v2.runtime.CanonicalRetroMap.maskOf(cb)
+            mask = mask or dev.cannoli.scorza.input.v2.runtime.CanonicalRetroMap.effectiveTarget(cb, remap)
         }
         runner.setInput(port, mask)
     }
@@ -958,12 +949,6 @@ class LibretroActivity : ComponentActivity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        val cs = currentScreen
-        if (cs is IGMScreen.EditButtons && editButtonsController.isListening
-            && event.action == KeyEvent.ACTION_DOWN) {
-            editButtonsController.captureRawKeyEvent(event.keyCode)
-            return true
-        }
         when (event.keyCode) {
             KeyEvent.KEYCODE_VOLUME_UP,
             KeyEvent.KEYCODE_VOLUME_DOWN,
@@ -1023,9 +1008,7 @@ class LibretroActivity : ComponentActivity() {
             is IGMScreen.AchievementDetail -> handleAchievementDetailInput(screen, button)
             is IGMScreen.GuidePicker -> handleGuidePickerInput(screen, button)
             is IGMScreen.Guide -> handleGuideInput(screen, button)
-            is IGMScreen.Controllers -> handleControllersInput(screen, button)
-            is IGMScreen.ControllerDetail -> handleControllerDetailInput(screen, button)
-            is IGMScreen.EditButtons -> handleEditButtonsInput(screen, keyCode, button)
+            is IGMScreen.Buttons -> handleButtonsInput(screen, keyCode, event.deviceId, event.repeatCount, button)
             is IGMScreen.ReassignPlayers -> handleReassignPlayersInput(screen, button)
         }
     }
@@ -1487,8 +1470,8 @@ class LibretroActivity : ComponentActivity() {
                         coreCategories = runner.getCoreCategories()
                         push(IGMScreen.Emulator())
                     }
-                    IGMSettings.CONTROLLERS -> {
-                        push(IGMScreen.Controllers())
+                    IGMSettings.BUTTONS -> {
+                        push(IGMScreen.Buttons())
                     }
                     IGMSettings.SHORTCUTS -> push(IGMScreen.Shortcuts())
                     IGMSettings.ADVANCED -> push(IGMScreen.Advanced())
@@ -2255,7 +2238,64 @@ class LibretroActivity : ComponentActivity() {
             IGMSettingsItem("Save for this game"),
             IGMSettingsItem("Discard")
         )
+        is IGMScreen.Buttons -> buildButtonsItems(screen)
         else -> emptyList()
+    }
+
+    private fun buildButtonsItems(screen: IGMScreen.Buttons): List<IGMSettingsItem> = buildList {
+        val canonicals = dev.cannoli.scorza.input.v2.CanonicalButton.entries
+            .filter { it != dev.cannoli.scorza.input.v2.CanonicalButton.BTN_MENU }
+        for (cb in canonicals) {
+            val isListening = screen.listeningCanonical == cb.name
+            val effective = inputRemap[cb]
+                ?: dev.cannoli.scorza.input.v2.runtime.CanonicalRetroMap.maskOf(cb)
+            val value = when {
+                isListening -> dev.cannoli.ui.ELLIPSIS
+                effective == 0 -> "—"
+                else -> retroMaskLabel(effective)
+            }
+            add(IGMSettingsItem(canonicalLabel(cb), value))
+        }
+    }
+
+    private fun canonicalLabel(cb: dev.cannoli.scorza.input.v2.CanonicalButton): String = when (cb) {
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_SOUTH -> "South"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_EAST -> "East"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_WEST -> "West"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_NORTH -> "North"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_L -> "L"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_R -> "R"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_L2 -> "L2"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_R2 -> "R2"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_L3 -> "L3"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_R3 -> "R3"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_START -> "Start"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_SELECT -> "Select"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_UP -> "Up"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_DOWN -> "Down"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_LEFT -> "Left"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_RIGHT -> "Right"
+        dev.cannoli.scorza.input.v2.CanonicalButton.BTN_MENU -> "Menu"
+    }
+
+    private fun retroMaskLabel(mask: Int): String = when (mask) {
+        RetroJoypad.RETRO_B -> "B"
+        RetroJoypad.RETRO_A -> "A"
+        RetroJoypad.RETRO_Y -> "Y"
+        RetroJoypad.RETRO_X -> "X"
+        RetroJoypad.RETRO_L -> "L"
+        RetroJoypad.RETRO_R -> "R"
+        RetroJoypad.RETRO_L2 -> "L2"
+        RetroJoypad.RETRO_R2 -> "R2"
+        RetroJoypad.RETRO_L3 -> "L3"
+        RetroJoypad.RETRO_R3 -> "R3"
+        RetroJoypad.RETRO_START -> "Start"
+        RetroJoypad.RETRO_SELECT -> "Select"
+        RetroJoypad.RETRO_UP -> "Up"
+        RetroJoypad.RETRO_DOWN -> "Down"
+        RetroJoypad.RETRO_LEFT -> "Left"
+        RetroJoypad.RETRO_RIGHT -> "Right"
+        else -> "?"
     }
 
     // --- Settings persistence ---
@@ -2276,6 +2316,7 @@ class LibretroActivity : ComponentActivity() {
             coreOptions = optionMap,
             shaderParams = paramMap,
             portDeviceTypes = portDeviceTypes,
+            inputRemap = inputRemap,
         )
     }
 
@@ -2283,12 +2324,14 @@ class LibretroActivity : ComponentActivity() {
         val settings = buildCurrentSettings()
         overrideManager.savePlatform(settings)
         platformBaseline = overrideManager.loadPlatformBaseline()
+        activeInputRemap = settings.inputRemap
     }
 
     private fun saveToGame() {
         val settings = buildCurrentSettings()
         val baseline = platformBaseline ?: overrideManager.loadPlatformBaseline()
         overrideManager.saveGameDelta(settings, baseline)
+        activeInputRemap = settings.inputRemap
     }
 
     private fun sourceLabel(source: OverrideSource): String = when (source) {
@@ -2309,6 +2352,8 @@ class LibretroActivity : ComponentActivity() {
         shortcutSource = settings.shortcutSource
         shortcuts = settings.shortcuts
         portDeviceTypes = settings.portDeviceTypes
+        inputRemap = settings.inputRemap
+        activeInputRemap = settings.inputRemap
 
         for ((key, value) in settings.coreOptions) {
             runner.setCoreOption(key, value)
@@ -2570,12 +2615,6 @@ class LibretroActivity : ComponentActivity() {
         }
     }
 
-    private fun controllersItemsForIgm(): List<Pair<String, Int?>> {
-        val s = controllersViewModel.state.value
-        return s.connected.map { it.mapping.id to it.androidDeviceId } +
-            s.savedMappings.map { it.id to null }
-    }
-
     /** Order of port slot rows on the Reassign Players screen: P1 .. P4. */
     private val reassignPortCount = 4
 
@@ -2628,72 +2667,62 @@ class LibretroActivity : ComponentActivity() {
     private fun deviceForPort(port: Int): Int? =
         portRouter.snapshotEntries().firstOrNull { it.port == port }?.androidDeviceId
 
-    private fun handleControllersInput(screen: IGMScreen.Controllers, button: String?): Boolean {
-        return when (button) {
-            "btn_up" -> {
-                val newIdx = (screen.selectedIndex - 1).coerceAtLeast(0)
-                if (newIdx != screen.selectedIndex) replaceTop(screen.copy(selectedIndex = newIdx))
-                true
+    private val buttonsCanonicals: List<dev.cannoli.scorza.input.v2.CanonicalButton>
+        get() = dev.cannoli.scorza.input.v2.CanonicalButton.entries
+            .filter { it != dev.cannoli.scorza.input.v2.CanonicalButton.BTN_MENU }
+
+    private fun resolveCanonicalForBinding(keyCode: Int, deviceId: Int): dev.cannoli.scorza.input.v2.CanonicalButton? {
+        val mapping = portRouter.mappingFor(deviceId) ?: activeMappingHolder.active.value ?: return null
+        return mapping.bindings.entries.firstOrNull { (_, bindings) ->
+            bindings.any { it is dev.cannoli.scorza.input.v2.InputBinding.Button && it.keyCode == keyCode }
+        }?.key
+    }
+
+    private fun handleButtonsInput(
+        screen: IGMScreen.Buttons,
+        keyCode: Int,
+        deviceId: Int,
+        repeatCount: Int,
+        button: String?,
+    ): Boolean {
+        val canonicals = buttonsCanonicals
+        val count = canonicals.size
+        if (count == 0) return true
+
+        if (screen.listeningCanonical != null) {
+            if (repeatCount > 0) return true
+            val pressed = resolveCanonicalForBinding(keyCode, deviceId) ?: return true
+            val target = canonicals.firstOrNull { it.name == screen.listeningCanonical } ?: return true
+            inputRemap = inputRemap.toMutableMap().also {
+                it[target] = dev.cannoli.scorza.input.v2.runtime.CanonicalRetroMap.maskOf(pressed)
             }
-            "btn_down" -> {
-                val maxIdx = (controllersItemsForIgm().size - 1).coerceAtLeast(0)
-                val newIdx = (screen.selectedIndex + 1).coerceAtMost(maxIdx)
-                if (newIdx != screen.selectedIndex) replaceTop(screen.copy(selectedIndex = newIdx))
-                true
-            }
-            "btn_south" -> {
-                val all = controllersItemsForIgm()
-                val selected = all.getOrNull(screen.selectedIndex) ?: return true
-                push(IGMScreen.ControllerDetail(mappingId = selected.first, androidDeviceId = selected.second))
-                true
-            }
-            "btn_east" -> { pop(); true }
-            else -> true
+            replaceTop(screen.copy(listeningCanonical = null))
+            return true
         }
-    }
 
-    private fun resolveDetailMapping(screen: IGMScreen.ControllerDetail): dev.cannoli.scorza.input.v2.DeviceMapping? {
-        val s = controllersViewModel.state.value
-        return s.connected.firstOrNull { it.mapping.id == screen.mappingId }?.mapping
-            ?: s.savedMappings.firstOrNull { it.id == screen.mappingId }
-    }
-
-    private fun handleControllerDetailInput(screen: IGMScreen.ControllerDetail, button: String?): Boolean {
-        val mapping = resolveDetailMapping(screen)
-        val rowCount = if (mapping?.userEdited == true) 6 else 5
         return when (button) {
             "btn_up" -> {
-                replaceTop(screen.copy(selectedIndex = (screen.selectedIndex - 1).mod(rowCount)))
+                replaceTop(screen.copy(selectedIndex = ((screen.selectedIndex - 1) + count) % count))
                 true
             }
             "btn_down" -> {
-                replaceTop(screen.copy(selectedIndex = (screen.selectedIndex + 1).mod(rowCount)))
-                true
-            }
-            "btn_left" -> {
-                if (mapping != null) when (screen.selectedIndex) {
-                    1 -> controllersViewModel.cycleConfirmButton(mapping)
-                    2 -> controllersViewModel.cycleGlyphStyle(mapping, -1)
-                    3 -> controllersViewModel.toggleExclude(mapping)
-                }
-                true
-            }
-            "btn_right" -> {
-                if (mapping != null) when (screen.selectedIndex) {
-                    1 -> controllersViewModel.cycleConfirmButton(mapping)
-                    2 -> controllersViewModel.cycleGlyphStyle(mapping, 1)
-                    3 -> controllersViewModel.toggleExclude(mapping)
-                }
+                replaceTop(screen.copy(selectedIndex = (screen.selectedIndex + 1) % count))
                 true
             }
             "btn_south" -> {
-                if (mapping == null) return true
-                when (screen.selectedIndex) {
-                    0 -> push(IGMScreen.EditButtons(mappingId = mapping.id))
-                    5 -> if (mapping.userEdited) {
-                        controllersViewModel.resetMapping(mapping)
-                        pop()
-                    }
+                val cb = canonicals.getOrNull(screen.selectedIndex) ?: return true
+                replaceTop(screen.copy(listeningCanonical = cb.name))
+                true
+            }
+            "btn_north" -> {
+                val cb = canonicals.getOrNull(screen.selectedIndex) ?: return true
+                inputRemap = inputRemap.toMutableMap().also { it[cb] = 0 }
+                true
+            }
+            "btn_west" -> {
+                if (inputRemap.isNotEmpty()) {
+                    inputRemap = emptyMap()
+                    showOsd("Buttons Reset To Default", OsdPosition.BottomCenter)
                 }
                 true
             }
@@ -2702,34 +2731,4 @@ class LibretroActivity : ComponentActivity() {
         }
     }
 
-
-    private fun handleEditButtonsInput(screen: IGMScreen.EditButtons, keyCode: Int, button: String?): Boolean {
-        if (editButtonsController.isListening) return true
-        val maxIdx = (dev.cannoli.scorza.input.v2.CanonicalButton.entries.size - 1).coerceAtLeast(0)
-        return when (button) {
-            "btn_up" -> {
-                val newIdx = (screen.selectedIndex - 1).coerceAtLeast(0)
-                if (newIdx != screen.selectedIndex) replaceTop(screen.copy(selectedIndex = newIdx))
-                true
-            }
-            "btn_down" -> {
-                val newIdx = (screen.selectedIndex + 1).coerceAtMost(maxIdx)
-                if (newIdx != screen.selectedIndex) replaceTop(screen.copy(selectedIndex = newIdx))
-                true
-            }
-            "btn_south" -> {
-                val canonical = dev.cannoli.scorza.input.v2.CanonicalButton.entries.getOrNull(screen.selectedIndex) ?: return true
-                val state = controllersViewModel.state.value
-                val mapping = state.connected.firstOrNull { it.mapping.id == screen.mappingId }?.mapping
-                    ?: state.savedMappings.firstOrNull { it.id == screen.mappingId }
-                    ?: mappingRepository.findById(screen.mappingId)
-                    ?: return true
-                editButtonsController.startListening(mapping, canonical)
-                replaceTop(screen.copy(listeningCanonical = canonical.name))
-                true
-            }
-            "btn_east" -> { pop(); true }
-            else -> true
-        }
-    }
 }

@@ -41,6 +41,7 @@
     <string name="label_rename">RENAME</string>
     <string name="label_set">SET</string>
     <string name="label_clear">CLEAR</string>
+    <string name="label_press">PRESS</string>
     <string name="label_kitchen">KITCHEN</string>
     <string name="label_hold_buttons" tools:ignore="TypographyEllipsis">HOLD ONE OR MORE BUTTONS...</string>
     <string name="label_confirm_delete">CONFIRM DELETE</string>
@@ -340,6 +341,7 @@
     <string name="igm_shader_settings">Shader Settings</string>
     <string name="igm_emulator">Emulator</string>
     <string name="igm_save_changes">Save Changes</string>
+    <string name="igm_buttons">Buttons</string>
     <string name="igm_save_and_quit">Save and Quit</string>
     <string name="title_guide">Guide</string>
 
