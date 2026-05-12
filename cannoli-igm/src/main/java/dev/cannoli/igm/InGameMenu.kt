@@ -80,7 +80,7 @@ fun InGameMenu(
     val showThumbnail = selectedIndex == menuOptions.saveStateIndex || selectedIndex == menuOptions.loadStateIndex
     val onDiscRow = selectedIndex == menuOptions.switchDiscIndex
 
-    ScreenBackground(backgroundImagePath = null, backgroundAlpha = 0.75f, backgroundColor = Color.Black) {
+    ScreenBackground(backgroundImagePath = null, backgroundAlpha = 0.85f, backgroundColor = Color.Black) {
         Box(
             modifier = Modifier
                 .fillMaxSize()

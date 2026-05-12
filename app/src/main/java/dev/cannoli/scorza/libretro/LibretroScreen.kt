@@ -277,7 +277,7 @@ fun LibretroScreen(
                     }
                     return path
                 }
-                ScreenBackground(backgroundImagePath = null, backgroundAlpha = 0.75f, backgroundColor = Color.Black) {
+                ScreenBackground(backgroundImagePath = null, backgroundAlpha = 0.85f, backgroundColor = Color.Black) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -413,7 +413,7 @@ fun LibretroScreen(
                     stringResource(R.string.ach_unlocked_date, date)
                 } else if (ach.unlocked) stringResource(R.string.ach_unlocked) else stringResource(R.string.ach_locked)
 
-                ScreenBackground(backgroundImagePath = null, backgroundAlpha = 0.75f, backgroundColor = Color.Black) {
+                ScreenBackground(backgroundImagePath = null, backgroundAlpha = 0.85f, backgroundColor = Color.Black) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()

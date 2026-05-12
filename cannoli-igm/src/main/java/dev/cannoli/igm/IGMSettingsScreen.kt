@@ -47,7 +47,7 @@ fun IGMSettingsScreen(
     val itemHeight = pillItemHeight(lineHeight, verticalPadding)
     val colors = LocalCannoliColors.current
 
-    ScreenBackground(backgroundImagePath = null, backgroundAlpha = 0.75f, backgroundColor = Color.Black) {
+    ScreenBackground(backgroundImagePath = null, backgroundAlpha = 0.85f, backgroundColor = Color.Black) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
