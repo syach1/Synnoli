@@ -274,9 +274,9 @@
     <string name="selected_count">%1$d Selected</string>
     <string name="battery_level">%1$d%%</string>
 
-    <!-- Onboarding permissions step -->
+    <!-- Onboarding wizard -->
     <string name="onboarding_header">SET UP CANNOLI</string>
-    <string name="onboarding_permissions_title">Required Permissions</string>
+    <string name="onboarding_permissions_title">Permissions and Storage</string>
     <string name="onboarding_storage_label">Storage access</string>
     <string name="onboarding_storage_rationale">Cannoli needs access to your ROMs, saves, art, and more. Without it, Cannoli can\'t do anything.</string>
     <string name="onboarding_bluetooth_label">Bluetooth</string>
@@ -284,17 +284,15 @@
     <string name="onboarding_status_granted">Granted</string>
     <string name="onboarding_status_not_granted">Not granted</string>
     <string name="onboarding_press_a_to_grant">Press A to grant</string>
+    <string name="onboarding_press_a_to_select_folder">Press A to select folder</string>
+    <string name="onboarding_storage_locked_hint">Configurable once permissions are granted.</string>
+    <string name="onboarding_select_folder">SELECT FOLDER</string>
 
     <!-- Boot error screen -->
     <string name="boot_error_title">Something went wrong</string>
 
-    <!-- Setup screen -->
-    <string name="setup_welcome">Welcome to Cannoli!</string>
-    <string name="setup_description">Select where to create your Cannoli folder.</string>
+    <!-- Storage row (shared with onboarding) -->
     <string name="setup_storage">Storage</string>
-    <string name="setup_continue">Continue</string>
-    <string name="install_continue">Continue</string>
-    <string name="setup_folder_label">Folder</string>
     <string name="setup_folder_unset">Not selected</string>
 
     <!-- System list -->

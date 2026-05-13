@@ -28,6 +28,7 @@ const val HOUSEKEEPING_DEFER_MS = 250L
 
 enum class HousekeepingKind(val title: String, val subtitle: String? = null) {
     DATABASE_MIGRATION("Updating your library", "Migrating legacy data"),
+    INITIAL_SCAN("Setting up your library"),
     LIBRARY_REFRESH("Refreshing library"),
 }
 

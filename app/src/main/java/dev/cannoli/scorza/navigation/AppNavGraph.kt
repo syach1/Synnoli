@@ -50,12 +50,10 @@ import dev.cannoli.scorza.ui.screens.DialogState
 import dev.cannoli.scorza.ui.screens.DirectoryBrowserScreen
 import dev.cannoli.scorza.ui.screens.GameListScreen
 import dev.cannoli.scorza.ui.screens.InputTesterScreen
-import dev.cannoli.scorza.ui.screens.InstallingScreen
 import dev.cannoli.scorza.ui.screens.LoggingSettingsScreen
 import dev.cannoli.scorza.ui.screens.KeyboardInputState
 import dev.cannoli.scorza.ui.screens.PortraitMarginOverlay
 import dev.cannoli.scorza.ui.screens.SettingsScreen
-import dev.cannoli.scorza.ui.screens.SetupScreen
 import dev.cannoli.scorza.ui.screens.SystemListScreen
 import dev.cannoli.scorza.ui.screens.isFullScreen
 import dev.cannoli.scorza.ui.viewmodel.ControllersViewModel
@@ -63,7 +61,6 @@ import dev.cannoli.scorza.ui.viewmodel.GameListViewModel
 import dev.cannoli.scorza.ui.viewmodel.InputTesterViewModel
 import dev.cannoli.scorza.ui.viewmodel.SettingsViewModel
 import dev.cannoli.scorza.ui.viewmodel.SystemListViewModel
-import dev.cannoli.ui.ELLIPSIS
 import dev.cannoli.ui.components.List
 import dev.cannoli.ui.components.LocalStatusBarLeftEdge
 import dev.cannoli.ui.components.MessageOverlay
@@ -178,27 +175,38 @@ sealed class LauncherScreen {
         override val itemCount: Int get() = entries.size + if (currentPath != "/storage/") 1 else 0
         override fun withScroll(selectedIndex: Int, scrollTarget: Int) = copy(selectedIndex = selectedIndex, scrollTarget = scrollTarget)
     }
-    data class Setup(
-        val volumes: List<Pair<String, String>> = emptyList(),
-        val volumeIndex: Int = 0,
-        val selectedIndex: Int = 0,
-        val customPath: String? = null
-    ) : LauncherScreen()
-    data class Installing(
-        val targetPath: String,
-        val progress: Float = 0f,
-        val statusLabel: String = "Kneading the dough$ELLIPSIS",
-        val finished: Boolean = false
-    ) : LauncherScreen()
     data class OnboardingPermissions(
         val permissions: List<OnboardingPermission>,
         val granted: Set<OnboardingPermission>,
+        val volumes: List<Pair<String, String>> = emptyList(),
+        val volumeIndex: Int = 0,
+        val customPath: String? = null,
         val selectedIndex: Int = 0,
     ) : LauncherScreen() {
-        val focusedPermission: OnboardingPermission get() = permissions[selectedIndex]
-        val isFocusedGranted: Boolean get() = focusedPermission in granted
         val allGranted: Boolean get() = granted.containsAll(permissions)
-        fun moved(delta: Int) = copy(selectedIndex = (selectedIndex + delta).coerceIn(0, permissions.lastIndex))
+        val storageRowIndex: Int get() = permissions.size
+        val focusableCount: Int get() = permissions.size + if (allGranted) 1 else 0
+        val isStorageRowFocused: Boolean get() = allGranted && selectedIndex == storageRowIndex
+        val focusedPermission: OnboardingPermission?
+            get() = if (selectedIndex in permissions.indices) permissions[selectedIndex] else null
+        val isFocusedGranted: Boolean get() = focusedPermission?.let { it in granted } ?: false
+        val selectedVolume: Pair<String, String>? get() = volumes.getOrNull(volumeIndex)
+        val isCustomVolume: Boolean get() = selectedVolume?.first == "Custom"
+        val continueEnabled: Boolean
+            get() = allGranted && volumes.isNotEmpty() && (!isCustomVolume || customPath != null)
+        val targetPath: String?
+            get() {
+                if (!continueEnabled) return null
+                return if (isCustomVolume) customPath else selectedVolume!!.second + "Cannoli/"
+            }
+        fun moved(delta: Int) = copy(
+            selectedIndex = (selectedIndex + delta).coerceIn(0, (focusableCount - 1).coerceAtLeast(0))
+        )
+        fun cycledVolume(delta: Int): OnboardingPermissions {
+            if (volumes.size <= 1) return this
+            val next = ((volumeIndex + delta) % volumes.size + volumes.size) % volumes.size
+            return copy(volumeIndex = next, customPath = null)
+        }
     }
     data class Housekeeping(
         val kind: dev.cannoli.scorza.ui.screens.HousekeepingKind,
@@ -738,24 +746,6 @@ fun AppNavGraph(
                     )
                 }
             }
-            is LauncherScreen.Setup -> {
-                val isCustom = currentScreen.volumes.getOrNull(currentScreen.volumeIndex)?.first == "Custom"
-                SetupScreen(
-                    storageLabel = currentScreen.volumes.getOrNull(currentScreen.volumeIndex)?.first ?: "",
-                    selectedIndex = currentScreen.selectedIndex,
-                    isCustom = isCustom,
-                    customPath = currentScreen.customPath,
-                    continueEnabled = !isCustom || currentScreen.customPath != null,
-                    buttonStyle = labels
-                )
-            }
-            is LauncherScreen.Installing -> {
-                InstallingScreen(
-                    progress = currentScreen.progress,
-                    statusLabel = currentScreen.statusLabel,
-                    finished = currentScreen.finished
-                )
-            }
             is LauncherScreen.Housekeeping -> {
                 dev.cannoli.scorza.ui.screens.HousekeepingScreen(
                     kind = currentScreen.kind,
@@ -869,6 +859,9 @@ fun AppNavGraph(
                 dev.cannoli.scorza.ui.screens.OnboardingPermissionsScreen(
                     permissions = currentScreen.permissions,
                     granted = currentScreen.granted,
+                    volumes = currentScreen.volumes,
+                    volumeIndex = currentScreen.volumeIndex,
+                    customPath = currentScreen.customPath,
                     selectedIndex = currentScreen.selectedIndex,
                     buttonStyle = labels,
                 )
@@ -882,8 +875,6 @@ fun AppNavGraph(
                 || dialog is KeyboardInputState
         val hideForScreen = currentScreen is LauncherScreen.Credits
                 || currentScreen is LauncherScreen.DirectoryBrowser
-                || currentScreen is LauncherScreen.Setup
-                || currentScreen is LauncherScreen.Installing
                 || currentScreen is LauncherScreen.Housekeeping
                 || currentScreen is LauncherScreen.InputTester
                 || currentScreen is LauncherScreen.OnboardingPermissions

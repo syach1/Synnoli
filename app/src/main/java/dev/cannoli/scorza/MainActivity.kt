@@ -163,8 +163,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
         loadLoggingPrefs()
 
         startStorageDependentHolder.register { startStorageDependent() }
-        onboardingHandler.onStartInstalling = { targetPath -> startInstalling(targetPath) }
-        onboardingHandler.onInstallFinished = { bootSequencer.onInstallFinished() }
+        onboardingHandler.onFolderChosen = { target -> bootSequencer.onFolderChosen(target) }
         onboardingHandler.onRequestPermission = { perm ->
             when (perm) {
                 dev.cannoli.scorza.navigation.OnboardingPermission.STORAGE -> requestStoragePermission()
@@ -172,7 +171,6 @@ class MainActivity : ComponentActivity(), ActivityActions {
                     bluetoothPermissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
             }
         }
-        onboardingHandler.onContinue = { bootSequencer.confirmPermissions() }
         router.unregisterCoreQueryReceiver = { unregisterCoreQueryReceiver() }
         router.wire(inputDispatcher)
 
@@ -200,34 +198,36 @@ class MainActivity : ComponentActivity(), ActivityActions {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     when (val s = boot) {
                         is BootState.Resolving -> Box(modifier = Modifier.fillMaxSize()) {}
-                        is BootState.NeedsPermission -> {
-                            LaunchedEffect(s.storageGranted, s.bluetoothGranted) {
+                        is BootState.NeedsPermission, is BootState.NeedsSetup -> {
+                            val storageGranted = (s as? BootState.NeedsPermission)?.storageGranted ?: true
+                            val bluetoothGranted = (s as? BootState.NeedsPermission)?.bluetoothGranted ?: true
+                            LaunchedEffect(storageGranted, bluetoothGranted) {
                                 val perms = buildList {
                                     add(dev.cannoli.scorza.navigation.OnboardingPermission.STORAGE)
                                     if (Build.VERSION.SDK_INT >= 31) add(dev.cannoli.scorza.navigation.OnboardingPermission.BLUETOOTH)
                                 }
                                 val granted = buildSet {
-                                    if (s.storageGranted) add(dev.cannoli.scorza.navigation.OnboardingPermission.STORAGE)
-                                    if (s.bluetoothGranted) add(dev.cannoli.scorza.navigation.OnboardingPermission.BLUETOOTH)
+                                    if (storageGranted) add(dev.cannoli.scorza.navigation.OnboardingPermission.STORAGE)
+                                    if (bluetoothGranted) add(dev.cannoli.scorza.navigation.OnboardingPermission.BLUETOOTH)
                                 }
+                                val volumes = setupCoordinator.detectStorageVolumes() + ("Custom" to "")
                                 val top = nav.currentScreen
                                 if (top is LauncherScreen.OnboardingPermissions) {
-                                    nav.replaceTop(top.copy(permissions = perms, granted = granted))
-                                } else {
+                                    val nowAllGranted = granted.containsAll(perms)
+                                    val newSelected = if (nowAllGranted && !top.allGranted) perms.size else top.selectedIndex
+                                    nav.replaceTop(top.copy(
+                                        permissions = perms,
+                                        granted = granted,
+                                        volumes = volumes,
+                                        selectedIndex = newSelected,
+                                    ))
+                                } else if (top !is LauncherScreen.DirectoryBrowser) {
                                     nav.screenStack.clear()
-                                    nav.screenStack.add(LauncherScreen.OnboardingPermissions(perms, granted))
-                                }
-                            }
-                            ReadyNavGraph()
-                        }
-                        is BootState.NeedsSetup -> {
-                            LaunchedEffect(s.volumes) {
-                                val top = nav.currentScreen
-                                if (top !is LauncherScreen.Setup
-                                    && top !is LauncherScreen.Installing
-                                    && top !is LauncherScreen.DirectoryBrowser) {
-                                    nav.screenStack.clear()
-                                    nav.screenStack.add(LauncherScreen.Setup(volumes = s.volumes))
+                                    nav.screenStack.add(LauncherScreen.OnboardingPermissions(
+                                        permissions = perms,
+                                        granted = granted,
+                                        volumes = volumes,
+                                    ))
                                 }
                             }
                             ReadyNavGraph()
@@ -236,6 +236,8 @@ class MainActivity : ComponentActivity(), ActivityActions {
                             val kind = when (s.phase) {
                                 dev.cannoli.scorza.boot.BootPhase.IMPORT ->
                                     dev.cannoli.scorza.ui.screens.HousekeepingKind.DATABASE_MIGRATION
+                                dev.cannoli.scorza.boot.BootPhase.INITIAL_SCAN ->
+                                    dev.cannoli.scorza.ui.screens.HousekeepingKind.INITIAL_SCAN
                                 dev.cannoli.scorza.boot.BootPhase.LIBRARY_REFRESH ->
                                     dev.cannoli.scorza.ui.screens.HousekeepingKind.LIBRARY_REFRESH
                             }
@@ -308,24 +310,6 @@ class MainActivity : ComponentActivity(), ActivityActions {
             dev.cannoli.scorza.util.InputLog.init(settings.sdCardRoot)
         }
         controllerV2Bridge.settleNow()
-    }
-
-    private fun startInstalling(targetPath: String) {
-        setupCoordinator.startInstalling(
-            targetPath = targetPath,
-            onProgress = { progress, label ->
-                val screen = nav.currentScreen as? LauncherScreen.Installing ?: return@startInstalling
-                nav.replaceTop(screen.copy(progress = progress, statusLabel = label))
-            },
-            onFinished = { _ ->
-                val screen = nav.currentScreen as? LauncherScreen.Installing ?: return@startInstalling
-                nav.replaceTop(screen.copy(
-                    progress = 1f,
-                    statusLabel = "Cannoli is now ready to be garnished!",
-                    finished = true
-                ))
-            },
-        )
     }
 
     private fun buildConnectedRows(): List<dev.cannoli.scorza.ui.viewmodel.ConnectedRow> {
@@ -481,6 +465,24 @@ class MainActivity : ComponentActivity(), ActivityActions {
         }
         if (inputDispatcher.handleKeyEvent(event)) {
             return true
+        }
+        // Onboarding wizard fallback: route raw D-pad / button keycodes when no device has been
+        // routed by the v2 bridge yet (e.g. TV remotes that aren't classified as gamepads, or
+        // the brief pre-settle window). Scoped to OnboardingPermissions so other screens keep
+        // using v2 routing as-is.
+        if (currentScreenForKey is LauncherScreen.OnboardingPermissions) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP -> { inputDispatcher.onUp(); return true }
+                KeyEvent.KEYCODE_DPAD_DOWN -> { inputDispatcher.onDown(); return true }
+                KeyEvent.KEYCODE_DPAD_LEFT -> { inputDispatcher.onLeft(); return true }
+                KeyEvent.KEYCODE_DPAD_RIGHT -> { inputDispatcher.onRight(); return true }
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_BUTTON_A ->
+                    { inputDispatcher.onConfirm(); return true }
+                KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE, KeyEvent.KEYCODE_BUTTON_B ->
+                    { inputDispatcher.onBack(); return true }
+                KeyEvent.KEYCODE_BUTTON_START, KeyEvent.KEYCODE_MENU ->
+                    { inputDispatcher.onStart(); return true }
+            }
         }
         return super.onKeyDown(keyCode, event)
     }

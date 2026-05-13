@@ -90,8 +90,6 @@ class InputRouter @Inject constructor(
         is LauncherScreen.EditButtons -> editButtonsHandler
         is LauncherScreen.LoggingSettings -> loggingSettingsHandler
         is LauncherScreen.OnboardingPermissions,
-        is LauncherScreen.Setup,
-        is LauncherScreen.Installing,
         is LauncherScreen.Housekeeping,
         is LauncherScreen.DirectoryBrowser -> onboardingHandler
         is LauncherScreen.ScrollableScreen -> scrollableHandlerFor(screen)

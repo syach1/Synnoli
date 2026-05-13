@@ -6,8 +6,8 @@ import dev.cannoli.scorza.input.LauncherActions
 import dev.cannoli.scorza.input.ScreenInputHandler
 import dev.cannoli.scorza.navigation.BrowsePurpose
 import dev.cannoli.scorza.navigation.LauncherScreen
-import dev.cannoli.scorza.navigation.OnboardingPermission
 import dev.cannoli.scorza.navigation.NavigationController
+import dev.cannoli.scorza.navigation.OnboardingPermission
 import dev.cannoli.scorza.settings.SettingsRepository
 import dev.cannoli.scorza.setup.SetupCoordinator
 import dev.cannoli.scorza.ui.screens.DialogState
@@ -22,16 +22,12 @@ class OnboardingInputHandler @Inject constructor(
     private val launcherActions: LauncherActions,
 ) : ScreenInputHandler {
 
-    var onStartInstalling: ((targetPath: String) -> Unit)? = null
-    var onInstallFinished: (() -> Unit)? = null
     var onRequestPermission: ((OnboardingPermission) -> Unit)? = null
-    var onContinue: (() -> Unit)? = null
+    var onFolderChosen: ((targetPath: String) -> Unit)? = null
 
     override fun onUp() {
         when (val screen = nav.currentScreen) {
             is LauncherScreen.OnboardingPermissions -> nav.replaceTop(screen.moved(-1))
-            is LauncherScreen.Setup ->
-                nav.replaceTop(screen.copy(selectedIndex = (screen.selectedIndex - 1).coerceAtLeast(0)))
             is LauncherScreen.DirectoryBrowser -> {
                 val hasSelect = screen.currentPath != "/storage/"
                 val count = screen.entries.size + if (hasSelect) 1 else 0
@@ -47,10 +43,6 @@ class OnboardingInputHandler @Inject constructor(
     override fun onDown() {
         when (val screen = nav.currentScreen) {
             is LauncherScreen.OnboardingPermissions -> nav.replaceTop(screen.moved(1))
-            is LauncherScreen.Setup -> {
-                val maxIndex = if (screen.volumes.getOrNull(screen.volumeIndex)?.first == "Custom") 1 else 0
-                nav.replaceTop(screen.copy(selectedIndex = (screen.selectedIndex + 1).coerceAtMost(maxIndex)))
-            }
             is LauncherScreen.DirectoryBrowser -> {
                 val hasSelect = screen.currentPath != "/storage/"
                 val count = screen.entries.size + if (hasSelect) 1 else 0
@@ -64,46 +56,29 @@ class OnboardingInputHandler @Inject constructor(
     }
 
     override fun onLeft() {
-        val screen = nav.currentScreen as? LauncherScreen.Setup ?: return
-        if (screen.selectedIndex == 0 && screen.volumes.size > 1) {
-            nav.replaceTop(screen.copy(
-                volumeIndex = (screen.volumeIndex - 1 + screen.volumes.size) % screen.volumes.size,
-                customPath = null
-            ))
-        }
+        val screen = nav.currentScreen as? LauncherScreen.OnboardingPermissions ?: return
+        if (screen.isStorageRowFocused) nav.replaceTop(screen.cycledVolume(-1))
     }
 
     override fun onRight() {
-        val screen = nav.currentScreen as? LauncherScreen.Setup ?: return
-        if (screen.selectedIndex == 0 && screen.volumes.size > 1) {
-            nav.replaceTop(screen.copy(
-                volumeIndex = (screen.volumeIndex + 1) % screen.volumes.size,
-                customPath = null
-            ))
-        }
+        val screen = nav.currentScreen as? LauncherScreen.OnboardingPermissions ?: return
+        if (screen.isStorageRowFocused) nav.replaceTop(screen.cycledVolume(1))
     }
 
     override fun onConfirm() {
         when (val screen = nav.currentScreen) {
-            is LauncherScreen.OnboardingPermissions ->
-                if (!screen.isFocusedGranted) onRequestPermission?.invoke(screen.focusedPermission)
-            is LauncherScreen.Setup -> {
-                val isCustom = screen.volumes.getOrNull(screen.volumeIndex)?.first == "Custom"
-                if (screen.selectedIndex == 1 && isCustom) {
-                    val entries = setupCoordinator.listDirectories("/storage/")
-                    nav.push(LauncherScreen.DirectoryBrowser(
-                        purpose = BrowsePurpose.SETUP,
-                        currentPath = "/storage/",
-                        entries = entries
-                    ))
-                }
-            }
-            is LauncherScreen.Installing -> {
-                if (screen.finished) {
-                    settings.sdCardRoot = screen.targetPath
-                    settings.setupCompleted = true
-                    val cb = onInstallFinished
-                    if (cb != null) cb() else activityActions.restartApp()
+            is LauncherScreen.OnboardingPermissions -> {
+                if (screen.isStorageRowFocused) {
+                    if (screen.isCustomVolume) {
+                        val entries = setupCoordinator.listDirectories("/storage/")
+                        nav.push(LauncherScreen.DirectoryBrowser(
+                            purpose = BrowsePurpose.SETUP,
+                            currentPath = "/storage/",
+                            entries = entries
+                        ))
+                    }
+                } else if (!screen.isFocusedGranted) {
+                    screen.focusedPermission?.let { onRequestPermission?.invoke(it) }
                 }
             }
             is LauncherScreen.DirectoryBrowser -> {
@@ -114,11 +89,11 @@ class OnboardingInputHandler @Inject constructor(
                     else screen.currentPath
                     when (screen.purpose) {
                         BrowsePurpose.SETUP -> {
-                            val setupIdx = nav.screenStack.indexOfLast { it is LauncherScreen.Setup }
-                            if (setupIdx >= 0) {
-                                val setup = nav.screenStack[setupIdx] as LauncherScreen.Setup
+                            val wizardIdx = nav.screenStack.indexOfLast { it is LauncherScreen.OnboardingPermissions }
+                            if (wizardIdx >= 0) {
+                                val wizard = nav.screenStack[wizardIdx] as LauncherScreen.OnboardingPermissions
                                 val path = if (resolved.endsWith("/")) resolved else "$resolved/"
-                                nav.screenStack[setupIdx] = setup.copy(customPath = path)
+                                nav.screenStack[wizardIdx] = wizard.copy(customPath = path)
                             }
                             nav.pop()
                         }
@@ -158,7 +133,6 @@ class OnboardingInputHandler @Inject constructor(
                     nav.pop()
                 }
             }
-            is LauncherScreen.Setup -> activityActions.finishAffinity()
             else -> {}
         }
     }
@@ -177,18 +151,8 @@ class OnboardingInputHandler @Inject constructor(
     }
 
     override fun onStart() {
-        when (val screen = nav.currentScreen) {
-            is LauncherScreen.OnboardingPermissions -> if (screen.allGranted) onContinue?.invoke()
-            is LauncherScreen.Setup -> {
-                val isCustom = screen.volumes.getOrNull(screen.volumeIndex)?.first == "Custom"
-                val continueEnabled = !isCustom || screen.customPath != null
-                if (!continueEnabled) return
-                val targetPath = if (isCustom) screen.customPath!!
-                    else screen.volumes[screen.volumeIndex].second + "Cannoli/"
-                nav.replaceTop(LauncherScreen.Installing(targetPath = targetPath))
-                onStartInstalling?.invoke(targetPath)
-            }
-            else -> {}
-        }
+        val screen = nav.currentScreen as? LauncherScreen.OnboardingPermissions ?: return
+        val target = screen.targetPath ?: return
+        onFolderChosen?.invoke(target)
     }
 }

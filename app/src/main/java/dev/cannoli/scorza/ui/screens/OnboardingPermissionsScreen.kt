@@ -1,5 +1,6 @@
 package dev.cannoli.scorza.ui.screens
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -11,17 +12,25 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.cannoli.scorza.R
 import dev.cannoli.scorza.navigation.OnboardingPermission
 import dev.cannoli.ui.ButtonStyle
+import dev.cannoli.ui.DPAD_HORIZONTAL
 import dev.cannoli.ui.START_GLYPH
 import dev.cannoli.ui.components.BottomBar
 import dev.cannoli.ui.components.footerReservation
@@ -33,17 +42,27 @@ import dev.cannoli.ui.theme.LocalCannoliTypography
 import dev.cannoli.ui.theme.Spacing
 
 private val GrantedGreen = Color(0xFF4CAF50)
+private val UnfocusedBorder = Color(0xFF333333)
 
 @Composable
 fun OnboardingPermissionsScreen(
     permissions: List<OnboardingPermission>,
     granted: Set<OnboardingPermission>,
+    volumes: List<Pair<String, String>>,
+    volumeIndex: Int,
+    customPath: String?,
     selectedIndex: Int,
     buttonStyle: ButtonStyle = ButtonStyle(),
 ) {
     val typo = LocalCannoliTypography.current
     val colors = LocalCannoliColors.current
     val accent = colors.accent
+    val allGranted = granted.containsAll(permissions)
+    val storageRowIndex = permissions.size
+    val isStorageRowFocused = allGranted && selectedIndex == storageRowIndex
+    val selectedVolume = volumes.getOrNull(volumeIndex)
+    val isCustom = selectedVolume?.first == "Custom"
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -54,6 +73,7 @@ fun OnboardingPermissionsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(bottom = footerReservation())
+                .verticalScroll(rememberScrollState())
         ) {
             Text(
                 text = stringResource(R.string.onboarding_header),
@@ -85,15 +105,37 @@ fun OnboardingPermissionsScreen(
                     typo = typo,
                 )
             }
+
+            Spacer(modifier = Modifier.height(Spacing.Md))
+
+            StorageCard(
+                value = when {
+                    isCustom && customPath != null -> customPath
+                    isCustom -> stringResource(R.string.setup_folder_unset)
+                    else -> selectedVolume?.first ?: stringResource(R.string.setup_folder_unset)
+                },
+                isLocked = !allGranted,
+                isFocused = isStorageRowFocused,
+                customPickPrompt = isStorageRowFocused && isCustom && customPath == null,
+                accent = accent,
+                typo = typo,
+            )
         }
 
-        val leftItems = listOf(buttonStyle.back to stringResource(R.string.label_quit))
+        val leftItems = mutableListOf(buttonStyle.back to stringResource(R.string.label_quit))
+        if (isStorageRowFocused && volumes.size > 1) {
+            leftItems.add(DPAD_HORIZONTAL to stringResource(R.string.label_change))
+        }
         val rightItems = mutableListOf<Pair<String, String>>()
-        val focused = permissions.getOrNull(selectedIndex)
-        if (focused != null && focused !in granted) {
+        val focusedPerm = permissions.getOrNull(selectedIndex)
+        if (focusedPerm != null && focusedPerm !in granted) {
             rightItems.add(buttonStyle.confirm to stringResource(R.string.label_grant))
         }
-        if (granted.containsAll(permissions)) {
+        if (isStorageRowFocused && isCustom && customPath == null) {
+            rightItems.add(buttonStyle.confirm to stringResource(R.string.onboarding_select_folder))
+        }
+        val continueEnabled = allGranted && volumes.isNotEmpty() && (!isCustom || customPath != null)
+        if (continueEnabled) {
             rightItems.add(START_GLYPH to stringResource(R.string.label_continue))
         }
         BottomBar(
@@ -104,6 +146,7 @@ fun OnboardingPermissionsScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PermissionCard(
     label: String,
@@ -113,14 +156,16 @@ private fun PermissionCard(
     accent: Color,
     typo: CannoliTypography,
 ) {
-    val borderColor = if (isFocused) accent else Color(0xFF333333)
+    val requester = remember { BringIntoViewRequester() }
+    LaunchedEffect(isFocused) { if (isFocused) requester.bringIntoView() }
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .border(2.dp, borderColor, RoundedCornerShape(8.dp))
+            .bringIntoViewRequester(requester)
+            .border(2.dp, if (isFocused) accent else UnfocusedBorder, RoundedCornerShape(8.dp))
             .padding(horizontal = Spacing.Md, vertical = Spacing.Sm),
     ) {
-        PermissionStatusRow(typo = typo, label = label, isGranted = isGranted)
+        StatusRow(typo = typo, label = label, isGranted = isGranted)
         Spacer(modifier = Modifier.height(4.dp))
         Text(text = rationale, style = typo.bodyMedium, color = GrayText)
         if (isFocused && !isGranted) {
@@ -130,8 +175,45 @@ private fun PermissionCard(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PermissionStatusRow(typo: CannoliTypography, label: String, isGranted: Boolean) {
+private fun StorageCard(
+    value: String,
+    isLocked: Boolean,
+    isFocused: Boolean,
+    customPickPrompt: Boolean,
+    accent: Color,
+    typo: CannoliTypography,
+) {
+    val requester = remember { BringIntoViewRequester() }
+    LaunchedEffect(isFocused) { if (isFocused) requester.bringIntoView() }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(if (isLocked) 0.35f else 1f)
+            .bringIntoViewRequester(requester)
+            .border(2.dp, if (isFocused) accent else UnfocusedBorder, RoundedCornerShape(8.dp))
+            .padding(horizontal = Spacing.Md, vertical = Spacing.Sm),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(text = stringResource(R.string.setup_storage), style = typo.bodyLarge, color = Color.White)
+            Text(text = value, style = typo.bodyMedium, color = GrayText)
+        }
+        if (isLocked) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(text = stringResource(R.string.onboarding_storage_locked_hint), style = typo.bodyMedium, color = GrayText)
+        } else if (customPickPrompt) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(text = stringResource(R.string.onboarding_press_a_to_select_folder), style = typo.bodyMedium, color = accent)
+        }
+    }
+}
+
+@Composable
+private fun StatusRow(typo: CannoliTypography, label: String, isGranted: Boolean) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,

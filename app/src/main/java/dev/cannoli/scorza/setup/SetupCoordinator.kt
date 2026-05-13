@@ -4,41 +4,14 @@ import android.content.Context
 import android.os.Build
 import android.os.storage.StorageManager
 import dagger.hilt.android.qualifiers.ApplicationContext
-import dev.cannoli.scorza.config.CoreInfoRepository
-import dev.cannoli.scorza.config.PlatformConfig
-import dev.cannoli.scorza.di.IoScope
-import dev.cannoli.scorza.launcher.ApkLauncher
-import dev.cannoli.scorza.launcher.ShellLauncher
-import dev.cannoli.scorza.launcher.EmuLauncher
-import dev.cannoli.scorza.launcher.InstalledCoreService
-import dev.cannoli.scorza.launcher.LaunchManager
-import dev.cannoli.scorza.launcher.RetroArchLauncher
-import dev.cannoli.scorza.settings.SettingsRepository
-import dev.cannoli.scorza.util.DirectoryLayout
 import dev.cannoli.scorza.util.NaturalSort
-import dev.cannoli.ui.ELLIPSIS
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
-data class InstalledServices(
-    val platformConfig: PlatformConfig,
-    val retroArchLauncher: RetroArchLauncher,
-    val emuLauncher: EmuLauncher,
-    val apkLauncher: ApkLauncher,
-    val installedCoreService: InstalledCoreService,
-    val launchManager: LaunchManager,
-)
-
 @Singleton
 class SetupCoordinator @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val settings: SettingsRepository,
-    @IoScope private val ioScope: CoroutineScope,
 ) {
     private var volumeMap: Map<String, String> = emptyMap()
 
@@ -106,64 +79,4 @@ class SetupCoordinator @Inject constructor(
     }
 
     fun isVolumeRoot(path: String): Boolean = detectStorageVolumes().any { it.second == path }
-
-    fun startInstalling(
-        targetPath: String,
-        onProgress: (progress: Float, label: String) -> Unit,
-        onFinished: (services: InstalledServices) -> Unit,
-    ) {
-        val labels = listOf(
-            "Kneading the dough$ELLIPSIS",
-            "Rolling the shells$ELLIPSIS",
-            "Heating the oil$ELLIPSIS",
-            "Frying the shells$ELLIPSIS",
-            "Making the filling$ELLIPSIS",
-            "Piping the rigott$ELLIPSIS"
-        )
-
-        ioScope.launch {
-            val root = File(targetPath)
-            val coreInfo = CoreInfoRepository(context.assets, context.filesDir, File(context.applicationInfo.sourceDir).lastModified())
-            coreInfo.load()
-            val bundledCoresDir = LaunchManager.extractBundledCores(context)
-            val platformConfig = PlatformConfig(root, context.assets, coreInfo, bundledCoresDir)
-            platformConfig.load()
-
-            val overhead = 7
-            val dirCount = 18 + (platformConfig.getAllTags().size * 6)
-            val totalSteps = dirCount + overhead
-            var completed = 0
-
-            fun step() {
-                completed++
-                val p = completed.toFloat() / totalSteps
-                val labelIndex = (p * labels.size).toInt().coerceIn(0, labels.lastIndex)
-                onProgress(p, labels[labelIndex])
-            }
-
-            DirectoryLayout.ensure(root, File(root, "Roms"), context.assets, platformConfig)
-            repeat(dirCount) { step() }
-
-            val retroArchLauncher = RetroArchLauncher(context) { settings.retroArchPackage }; step()
-            val emuLauncher = EmuLauncher(context); step()
-            val apkLauncher = ApkLauncher(context, ShellLauncher(context)); step()
-            val installedCoreService = InstalledCoreService(context); step()
-            val lm = LaunchManager(context, settings, platformConfig, retroArchLauncher, emuLauncher, apkLauncher, installedCoreService); step()
-            lm.syncRetroArchAssets(root); step()
-            lm.syncRetroArchConfig(root); step()
-
-            val services = InstalledServices(
-                platformConfig = platformConfig,
-                retroArchLauncher = retroArchLauncher,
-                emuLauncher = emuLauncher,
-                apkLauncher = apkLauncher,
-                installedCoreService = installedCoreService,
-                launchManager = lm,
-            )
-
-            withContext(Dispatchers.Main) {
-                onFinished(services)
-            }
-        }
-    }
 }

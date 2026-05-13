@@ -9,4 +9,4 @@ sealed interface BootState {
     data object Ready : BootState
 }
 
-enum class BootPhase { IMPORT, LIBRARY_REFRESH }
+enum class BootPhase { IMPORT, INITIAL_SCAN, LIBRARY_REFRESH }

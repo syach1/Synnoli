@@ -63,10 +63,10 @@ class BootInitializer @Inject constructor(
 ) {
 
     suspend fun run(onPhase: (BootPhase, Float, String) -> Unit): BootResult {
-        onPhase(BootPhase.IMPORT, 0f, "Preparing")
-
         val root = cannoliPaths.root
         val romDir = cannoliPaths.romDir
+        val importPhase = if (hasLegacyData(root)) BootPhase.IMPORT else BootPhase.INITIAL_SCAN
+        onPhase(importPhase, 0f, "Preparing")
 
         ScanLog.init(root.absolutePath)
         dev.cannoli.scorza.util.InputLog.init(root.absolutePath)
@@ -82,7 +82,7 @@ class BootInitializer @Inject constructor(
             platformConfig = platformConfig,
             romScanner = romScanner,
             onProgress = ImportProgress { progress, label ->
-                onPhase(BootPhase.IMPORT, progress, label)
+                onPhase(importPhase, progress, label)
             },
         )
 
@@ -170,5 +170,19 @@ class BootInitializer @Inject constructor(
                 onComplete = { cont.resume(BootResult.Success) },
             )
         }
+    }
+
+    private fun hasLegacyData(root: File): Boolean {
+        val p = CannoliPaths(root)
+        return p.collectionsDir.exists() ||
+            p.coresJson.exists() ||
+            p.raGameIdsFile.exists() ||
+            p.raGameIdsLegacyFile.exists() ||
+            p.recentlyPlayedFile.exists() ||
+            p.configOrdering.exists() ||
+            p.toolsDir.exists() ||
+            p.portsDir.exists() ||
+            p.platformCacheFile.exists() ||
+            p.gameCacheFile.exists()
     }
 }
