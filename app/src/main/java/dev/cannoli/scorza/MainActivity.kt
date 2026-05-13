@@ -134,7 +134,10 @@ class MainActivity : ComponentActivity(), ActivityActions {
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         dev.cannoli.scorza.util.InputLog.write("BLUETOOTH_CONNECT permission ${if (granted) "granted" else "denied"}")
-        if (granted) controllerV2Bridge.settleNow()
+        if (granted) {
+            controllerV2Bridge.startBtTracker()
+            controllerV2Bridge.settleNow()
+        }
         bootSequencer.onBluetoothPermissionResult(granted)
     }
 
@@ -171,6 +174,12 @@ class MainActivity : ComponentActivity(), ActivityActions {
         }
         router.unregisterCoreQueryReceiver = { unregisterCoreQueryReceiver() }
         router.wire(inputDispatcher)
+
+        controllerBlacklist.load(this)
+        val btReady = Build.VERSION.SDK_INT < 31 || ContextCompat.checkSelfPermission(
+            this, Manifest.permission.BLUETOOTH_CONNECT
+        ) == PackageManager.PERMISSION_GRANTED
+        controllerV2Bridge.start(this, includeBtTracker = btReady)
 
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {}
@@ -288,15 +297,16 @@ class MainActivity : ComponentActivity(), ActivityActions {
     }
 
     /**
-     * Wire up everything that needs MANAGE_EXTERNAL_STORAGE access. Idempotent — BootSequencer
-     * only invokes this once, on the NeedsPermission -> Initializing edge.
+     * Re-run the storage-backed parts of input setup once MANAGE_EXTERNAL_STORAGE is available:
+     * point the input log at the SD card and re-settle so controllers pick up saved profiles.
+     * The controller bridge itself is started in onCreate (before permission) so the onboarding
+     * wizard is operable. BootSequencer invokes this once, on the edge into Initializing.
      */
     private fun startStorageDependent() {
         if (settings.sdCardRoot.isNotEmpty()) {
             dev.cannoli.scorza.util.InputLog.init(settings.sdCardRoot)
         }
-        controllerBlacklist.load(this)
-        controllerV2Bridge.start(this)
+        controllerV2Bridge.settleNow()
     }
 
     private fun startInstalling(targetPath: String) {

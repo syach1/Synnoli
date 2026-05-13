@@ -40,6 +40,7 @@ class ControllerV2Bridge(
     private val identityToPrimary = mutableMapOf<PhysicalIdentity, Int>()
     private val identityCache = mutableMapOf<Int, PhysicalIdentity>()
     private var listener: InputManager.InputDeviceListener? = null
+    private var btTrackerStarted = false
     private var initialEnumerationDone = false
     private var appContext: Context? = null
 
@@ -61,7 +62,7 @@ class ControllerV2Bridge(
         val port: Int?,
     )
 
-    fun start(context: Context) {
+    fun start(context: Context, includeBtTracker: Boolean = true) {
         if (listener != null) return
         appContext = context.applicationContext
         dev.cannoli.scorza.util.InputLog.write("--- bridge start (Build.MODEL='$buildModel') ---")
@@ -85,8 +86,19 @@ class ControllerV2Bridge(
         }
         listener = l
         inputManager.registerInputDeviceListener(l, null)
-        btTracker?.start()
+        if (includeBtTracker) startBtTracker()
         scheduleSettle()
+    }
+
+    /**
+     * Starts the BT HID connection tracker. Split out of [start] so callers that lack
+     * BLUETOOTH_CONNECT (the onboarding wizard, before the permission is granted) can bring up
+     * the rest of the bridge first and start the tracker once the permission lands.
+     */
+    fun startBtTracker() {
+        if (btTrackerStarted) return
+        btTrackerStarted = true
+        btTracker?.start()
     }
 
     fun stop(context: Context) {
@@ -95,6 +107,7 @@ class ControllerV2Bridge(
         val inputManager = context.getSystemService(Context.INPUT_SERVICE) as InputManager
         inputManager.unregisterInputDeviceListener(l)
         btTracker?.stop()
+        btTrackerStarted = false
         identityCache.clear()
         initialEnumerationDone = false
         listener = null
