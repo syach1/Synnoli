@@ -1427,6 +1427,11 @@ class DialogInputHandler @Inject constructor(
                 romFile.parentFile?.name == romFile.nameWithoutExtension -> {
                 romFile.parentFile?.deleteRecursively()
             }
+            // Organizer-created single-disc cue bundle: subfolder is dedicated to this cue (folder name == cue stem).
+            romFile.extension.equals("cue", ignoreCase = true) &&
+                romFile.parentFile?.name == romFile.nameWithoutExtension -> {
+                romFile.parentFile?.deleteRecursively()
+            }
             // User-authored m3u sitting alongside discs: delete each line and the m3u itself.
             romFile.extension.equals("m3u", ignoreCase = true) -> {
                 val parent = romFile.parentFile
