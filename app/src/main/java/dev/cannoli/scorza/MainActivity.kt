@@ -20,6 +20,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -55,6 +56,8 @@ import dev.cannoli.scorza.navigation.LauncherScreen
 import dev.cannoli.scorza.navigation.NavigationController
 import dev.cannoli.scorza.settings.SettingsRepository
 import dev.cannoli.scorza.setup.SetupCoordinator
+import dev.cannoli.scorza.ui.LocalPortraitMargin
+import dev.cannoli.scorza.ui.PortraitMarginState
 import dev.cannoli.scorza.ui.screens.BootErrorScreen
 import dev.cannoli.scorza.ui.screens.DialogState
 import dev.cannoli.scorza.ui.viewmodel.GameListViewModel
@@ -180,6 +183,9 @@ class MainActivity : ComponentActivity(), ActivityActions {
             }
             CannoliTheme(fontFamily = themeFont) {
                 Surface(modifier = Modifier.fillMaxSize()) {
+                    CompositionLocalProvider(
+                        LocalPortraitMargin provides PortraitMarginState(marginPx = settings.portraitMarginPx)
+                    ) {
                     when (val s = boot) {
                         is BootState.Resolving -> Box(modifier = Modifier.fillMaxSize()) {}
                         is BootState.NeedsPermission, is BootState.NeedsSetup -> {
@@ -228,6 +234,7 @@ class MainActivity : ComponentActivity(), ActivityActions {
                         }
                         is BootState.Error -> BootErrorScreen(message = s.message)
                         is BootState.Ready -> ReadyNavGraph()
+                    }
                     }
                 }
             }
