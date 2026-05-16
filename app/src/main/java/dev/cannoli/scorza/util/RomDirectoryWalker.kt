@@ -107,7 +107,8 @@ class RomDirectoryWalker(
             if (launch != null) {
                 val launchRel = "$relPrefix${subdir.name}${File.separator}${launch.file.name}"
                 val discRels = launch.discFiles?.map { "$relPrefix${subdir.name}${File.separator}${it.name}" }
-                out.add(ScannedRom(launchRel, subdir.name, null, discRels))
+                val (displayName, tags) = splitNameAndTags(subdir.name)
+                out.add(ScannedRom(launchRel, displayName, tags, discRels))
             } else if (subdir.listFiles()?.any { !it.name.startsWith(".") } == true) {
                 scanDir(subdir, "$relPrefix${subdir.name}${File.separator}", isArcade, out, depth + 1)
             }
