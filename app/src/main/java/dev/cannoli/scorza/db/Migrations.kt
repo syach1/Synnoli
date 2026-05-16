@@ -88,6 +88,21 @@ internal object Migrations {
                 )
             """.trimIndent())
         },
+        Migration(2) { db ->
+            db.execSQL("""
+                UPDATE collection_members
+                SET sort_order = (
+                    SELECT COUNT(*) FROM collection_members AS earlier
+                    WHERE earlier.collection_id = collection_members.collection_id
+                      AND earlier.id < collection_members.id
+                )
+                WHERE collection_id IN (
+                    SELECT collection_id FROM collection_members
+                    GROUP BY collection_id
+                    HAVING MAX(sort_order) = 0 AND COUNT(*) > 1
+                )
+            """.trimIndent())
+        },
     )
 
     val current: Int = all.maxOf { it.version }
