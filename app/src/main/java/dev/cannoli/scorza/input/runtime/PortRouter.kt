@@ -15,6 +15,8 @@ class PortRouter(private val maxPorts: Int = 4) {
         var mapping: DeviceMapping,
         var port: Int?,
         var evaluator: PortEvaluator,
+        var activated: Boolean = false,
+        var activatedAtMillis: Long = 0L,
     )
 
     private val entries = linkedMapOf<Int, Entry>()
@@ -27,12 +29,32 @@ class PortRouter(private val maxPorts: Int = 4) {
     private val _entrySnapshots = MutableStateFlow<List<Snapshot>>(emptyList())
     val entrySnapshots: StateFlow<List<Snapshot>> = _entrySnapshots.asStateFlow()
 
+    var onActivatedListener: ((ConnectedDevice) -> Unit)? = null
+
     private fun resolveId(deviceId: Int): Int = aliases[deviceId] ?: deviceId
 
     fun onConnect(device: ConnectedDevice, mapping: DeviceMapping) {
         if (entries.containsKey(device.androidDeviceId)) return
         entries[device.androidDeviceId] = Entry(device, mapping, port = null, evaluator = PortEvaluator(mapping))
         recompute()
+    }
+
+    fun isActivated(androidDeviceId: Int): Boolean =
+        entries[resolveId(androidDeviceId)]?.activated == true
+
+    fun activate(androidDeviceId: Int, nowMillis: Long): Boolean {
+        val primary = resolveId(androidDeviceId)
+        val entry = entries[primary] ?: return false
+        if (entry.activated) return false
+        entry.activated = true
+        entry.activatedAtMillis = nowMillis
+        dev.cannoli.scorza.util.InputLog.write(
+            "activate id=$primary '${entry.mapping.displayName}' built_in=${entry.device.isBuiltIn} t=$nowMillis"
+        )
+        // Recompute first so listeners that read portFor() in their callback see the new port.
+        recompute()
+        onActivatedListener?.invoke(entry.device)
+        return true
     }
 
     fun onDisconnect(androidDeviceId: Int) {
@@ -96,7 +118,8 @@ class PortRouter(private val maxPorts: Int = 4) {
     fun reassign(deviceId: Int, toPort: Int) {
         if (toPort < 0 || toPort >= maxPorts) return
         val target = entries[resolveId(deviceId)] ?: return
-        val displaced = entries.values.firstOrNull { it.port == toPort && it != target }
+        if (!target.activated) return
+        val displaced = entries.values.firstOrNull { it.port == toPort && it != target && it.activated }
         val previous = target.port
         target.port = toPort
         displaced?.port = previous
@@ -111,11 +134,16 @@ class PortRouter(private val maxPorts: Int = 4) {
         for (entry in entries.values) entry.port = null
 
         val ordered = entries.values
-            .sortedBy { it.device.connectedAtMillis }
+            .filter { it.activated }
+            .sortedBy { it.activatedAtMillis }
             .toMutableList()
-        val launchEntry = launcherTriggerDeviceId?.let { entries[it] }
+        val launchEntry = launcherTriggerDeviceId
+            ?.let { entries[it] }
+            ?.takeIf { it.activated }
 
-        val externalPresent = entries.values.any { !it.device.isBuiltIn && !it.mapping.excludeFromGameplay }
+        val externalPresent = entries.values.any {
+            it.activated && !it.device.isBuiltIn && !it.mapping.excludeFromGameplay
+        }
         val externalLaunched = launchEntry != null && !launchEntry.device.isBuiltIn
 
         val occupied = BooleanArray(maxPorts)
