@@ -301,6 +301,7 @@ fun AppNavGraph(
             }
             is LauncherScreen.GameList -> {
                 if (gameListViewModel == null) return@Box
+                inputRouter?.let { dev.cannoli.scorza.input.screen.compose.ScreenInput(it.gameListHandler) }
                 GameListScreen(
                     viewModel = gameListViewModel,
                     backgroundImagePath = appSettings.backgroundImagePath,
@@ -318,13 +319,16 @@ fun AppNavGraph(
                 )
             }
             is LauncherScreen.InputTester -> {
+                inputRouter?.let { dev.cannoli.scorza.input.screen.compose.ScreenInput(it.inputTesterHandler) }
                 InputTesterScreen(
                     viewModel = inputTesterViewModel,
                     buttonStyle = labels,
                     onExit = onExitInputTester,
                 )
             }
-            is LauncherScreen.Settings -> SettingsScreen(
+            is LauncherScreen.Settings -> {
+                inputRouter?.let { dev.cannoli.scorza.input.screen.compose.ScreenInput(it.settingsHandler) }
+                SettingsScreen(
                 viewModel = settingsViewModel,
                 backgroundImagePath = appSettings.backgroundImagePath,
                 backgroundTint = appSettings.backgroundTint,
@@ -338,6 +342,7 @@ fun AppNavGraph(
                 onListStateChanged = onListStateChanged,
                 buttonStyle = labels,
             )
+            }
             is LauncherScreen.CoreMapping -> {
                 val filterLabel = when (currentScreen.filter) {
                     1 -> "MISSING"
@@ -720,6 +725,7 @@ fun AppNavGraph(
                 }
             }
             is LauncherScreen.DirectoryBrowser -> {
+                inputRouter?.let { dev.cannoli.scorza.input.screen.compose.ScreenInput(it.onboardingHandler) }
                 DirectoryBrowserScreen(
                     currentPath = currentScreen.currentPath,
                     entries = currentScreen.entries,
@@ -749,6 +755,7 @@ fun AppNavGraph(
                 }
             }
             is LauncherScreen.Housekeeping -> {
+                inputRouter?.let { dev.cannoli.scorza.input.screen.compose.ScreenInput(it.onboardingHandler) }
                 dev.cannoli.scorza.ui.screens.HousekeepingScreen(
                     kind = currentScreen.kind,
                     progress = currentScreen.progress,
@@ -767,7 +774,9 @@ fun AppNavGraph(
                     onListStateChanged = onListStateChanged
                 )
             }
-            is LauncherScreen.Controllers -> ControllersScreen(
+            is LauncherScreen.Controllers -> {
+                inputRouter?.let { dev.cannoli.scorza.input.screen.compose.ScreenInput(it.controllersHandler) }
+                ControllersScreen(
                 screen = currentScreen,
                 viewModel = controllersViewModel,
                 modifier = Modifier.fillMaxSize(),
@@ -778,7 +787,9 @@ fun AppNavGraph(
                 listVerticalPadding = listVerticalPadding,
                 buttonStyle = labels,
             )
+            }
             is LauncherScreen.ControllerDetail -> {
+                inputRouter?.let { dev.cannoli.scorza.input.screen.compose.ScreenInput(it.controllerDetailHandler) }
                 val controllersState by controllersViewModel.state.collectAsState()
                 val mapping = controllersState.connected.firstOrNull { it.mapping.id == currentScreen.mappingId }?.mapping
                     ?: controllersState.savedMappings.firstOrNull { it.id == currentScreen.mappingId }
@@ -806,6 +817,7 @@ fun AppNavGraph(
                 }
             }
             is LauncherScreen.EditButtons -> {
+                inputRouter?.let { dev.cannoli.scorza.input.screen.compose.ScreenInput(it.editButtonsHandler) }
                 val editState by controllersViewModel.state.collectAsState()
                 val mapping = editState.connected.firstOrNull { it.mapping.id == currentScreen.mappingId }?.mapping
                     ?: editState.savedMappings.firstOrNull { it.id == currentScreen.mappingId }
@@ -847,17 +859,21 @@ fun AppNavGraph(
                     buttonStyle = labels,
                 )
             }
-            is LauncherScreen.LoggingSettings -> LoggingSettingsScreen(
-                screen = currentScreen,
-                modifier = Modifier.fillMaxSize(),
-                backgroundImagePath = appSettings.backgroundImagePath,
-                backgroundTint = appSettings.backgroundTint,
-                listFontSize = listFontSize,
-                listLineHeight = listLineHeight,
-                listVerticalPadding = listVerticalPadding,
-                buttonStyle = labels,
-            )
+            is LauncherScreen.LoggingSettings -> {
+                inputRouter?.let { dev.cannoli.scorza.input.screen.compose.ScreenInput(it.loggingSettingsHandler) }
+                LoggingSettingsScreen(
+                    screen = currentScreen,
+                    modifier = Modifier.fillMaxSize(),
+                    backgroundImagePath = appSettings.backgroundImagePath,
+                    backgroundTint = appSettings.backgroundTint,
+                    listFontSize = listFontSize,
+                    listLineHeight = listLineHeight,
+                    listVerticalPadding = listVerticalPadding,
+                    buttonStyle = labels,
+                )
+            }
             is LauncherScreen.OnboardingPermissions -> {
+                inputRouter?.let { dev.cannoli.scorza.input.screen.compose.ScreenInput(it.onboardingHandler) }
                 dev.cannoli.scorza.ui.screens.OnboardingPermissionsScreen(
                     permissions = currentScreen.permissions,
                     granted = currentScreen.granted,
