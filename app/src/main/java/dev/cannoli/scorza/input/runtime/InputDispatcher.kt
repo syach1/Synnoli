@@ -12,6 +12,7 @@ import javax.inject.Singleton
 class InputDispatcher @Inject constructor(
     private val portRouter: PortRouter,
     private val activeMappingHolder: ActiveMappingHolder,
+    private val screenInputRegistry: ScreenInputRegistry = ScreenInputRegistry(),
 ) {
 
     /** Overridable for tests; production calls System.currentTimeMillis. */
@@ -36,12 +37,26 @@ class InputDispatcher @Inject constructor(
     var onNorth: () -> Unit = {}
     var onMenu: () -> Unit = {}
 
-    fun handleKeyEvent(event: KeyEvent): Boolean = handleKeyEventForTest(
-        deviceId = event.deviceId,
-        keyCode = event.keyCode,
-        action = event.action,
-        repeatCount = event.repeatCount,
-    )
+    fun handleKeyEvent(event: KeyEvent): Boolean {
+        // Raw event hook: screens that need keycode/deviceId/repeatCount (binding capture,
+        // shortcut chord capture) override onRawKeyDown/onRawKeyUp and can short-circuit before
+        // canonical dispatch.
+        val handler = screenInputRegistry.top
+        if (handler !== dev.cannoli.scorza.input.screen.EmptyScreenInputHandler) {
+            val consumed = when (event.action) {
+                KeyEvent.ACTION_DOWN -> handler.onRawKeyDown(event.keyCode, event)
+                KeyEvent.ACTION_UP -> handler.onRawKeyUp(event.keyCode, event)
+                else -> false
+            }
+            if (consumed) return true
+        }
+        return handleKeyEventForTest(
+            deviceId = event.deviceId,
+            keyCode = event.keyCode,
+            action = event.action,
+            repeatCount = event.repeatCount,
+        )
+    }
 
     fun handleMotionEvent(event: MotionEvent): Boolean {
         val device = event.device ?: return false
