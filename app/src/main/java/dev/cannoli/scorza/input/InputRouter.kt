@@ -53,29 +53,27 @@ class InputRouter @Inject constructor(
     fun wire(dispatcher: InputDispatcher) {
         gameListHandler.buildContextOptions = dialogHandler::buildGameContextOptions
 
-        // Always give the dialog handler first crack -- it returns false if no dialog is active,
-        // true if it consumed the input. When no dialog is active, dispatch falls to the screen
-        // handler from the registry (every launcher screen pushes one via ScreenInput); the
-        // legacy currentHandler() switch is the defensive fallback if a screen forgot to push.
-        fun screenLeg(): dev.cannoli.scorza.input.ScreenInputHandler {
-            val h = screenInputRegistry.top
-            return if (h !== dev.cannoli.scorza.input.screen.EmptyScreenInputHandler) h else currentHandler()
-        }
-        dispatcher.onUp = { if (!dialogHandler.onUp()) screenLeg().onUp() }
-        dispatcher.onDown = { if (!dialogHandler.onDown()) screenLeg().onDown() }
-        dispatcher.onLeft = { if (!dialogHandler.onLeft()) screenLeg().onLeft() }
-        dispatcher.onRight = { if (!dialogHandler.onRight()) screenLeg().onRight() }
-        dispatcher.onConfirm = { if (!dialogHandler.onConfirm()) screenLeg().onConfirm() }
-        dispatcher.onBack = { if (!dialogHandler.onBack()) screenLeg().onBack() }
-        dispatcher.onStart = { if (!dialogHandler.onStart()) screenLeg().onStart() }
-        dispatcher.onSelect = { if (!dialogHandler.onSelect()) screenLeg().onSelect() }
+        // Dialog handler gets first crack and returns true if it consumed the input. When no
+        // dialog is active, dispatch goes to whichever ScreenInputHandler is at the top of the
+        // registry (every launcher screen pushes one via ScreenInput in AppNavGraph; if the
+        // registry is briefly empty during a transition, EmptyScreenInputHandler's defaults are
+        // safe no-ops).
+        fun screen(): dev.cannoli.scorza.input.ScreenInputHandler = screenInputRegistry.top
+        dispatcher.onUp = { if (!dialogHandler.onUp()) screen().onUp() }
+        dispatcher.onDown = { if (!dialogHandler.onDown()) screen().onDown() }
+        dispatcher.onLeft = { if (!dialogHandler.onLeft()) screen().onLeft() }
+        dispatcher.onRight = { if (!dialogHandler.onRight()) screen().onRight() }
+        dispatcher.onConfirm = { if (!dialogHandler.onConfirm()) screen().onConfirm() }
+        dispatcher.onBack = { if (!dialogHandler.onBack()) screen().onBack() }
+        dispatcher.onStart = { if (!dialogHandler.onStart()) screen().onStart() }
+        dispatcher.onSelect = { if (!dialogHandler.onSelect()) screen().onSelect() }
         dispatcher.onSelectUp = { onSelectUp() }
-        dispatcher.onNorth = { if (!dialogHandler.onNorth()) screenLeg().onNorth() }
-        dispatcher.onWest = { if (!dialogHandler.onWest()) screenLeg().onWest() }
-        dispatcher.onL1 = { if (!dialogHandler.onL1()) screenLeg().onL1() }
-        dispatcher.onR1 = { if (!dialogHandler.onR1()) screenLeg().onR1() }
-        dispatcher.onL2 = { if (!dialogHandler.onL2()) screenLeg().onL2() }
-        dispatcher.onR2 = { if (!dialogHandler.onR2()) screenLeg().onR2() }
+        dispatcher.onNorth = { if (!dialogHandler.onNorth()) screen().onNorth() }
+        dispatcher.onWest = { if (!dialogHandler.onWest()) screen().onWest() }
+        dispatcher.onL1 = { if (!dialogHandler.onL1()) screen().onL1() }
+        dispatcher.onR1 = { if (!dialogHandler.onR1()) screen().onR1() }
+        dispatcher.onL2 = { if (!dialogHandler.onL2()) screen().onL2() }
+        dispatcher.onR2 = { if (!dialogHandler.onR2()) screen().onR2() }
     }
 
     fun onSelectUp() {
@@ -83,24 +81,20 @@ class InputRouter @Inject constructor(
         gameListHandler.cancelSelectHoldTimer()
 
         val dialogConsumed = dialogHandler.onSelectUp()
-        if (!dialogConsumed) currentHandler().onSelectUp()
+        if (!dialogConsumed) screenInputRegistry.top.onSelectUp()
 
         nav.selectDown = false
         nav.selectHeld = false
     }
 
+    /**
+     * Returns the appropriate handler for a ScrollableScreen instance. Used by [AppNavGraph] to
+     * push a handler via ScreenInput for screens that don't have a dedicated handler class --
+     * the handler is generated inline from the [scrollable] factory each time the screen is
+     * composed. Other screens (with dedicated handler classes like [SystemListInputHandler])
+     * push their handler directly via this router's public fields, bypassing this method.
+     */
     fun currentHandler(): ScreenInputHandler = when (val screen = nav.currentScreen) {
-        LauncherScreen.SystemList  -> systemListHandler
-        LauncherScreen.GameList    -> gameListHandler
-        LauncherScreen.Settings    -> settingsHandler
-        LauncherScreen.InputTester -> inputTesterHandler
-        is LauncherScreen.Controllers -> controllersHandler
-        is LauncherScreen.ControllerDetail -> controllerDetailHandler
-        is LauncherScreen.EditButtons -> editButtonsHandler
-        is LauncherScreen.LoggingSettings -> loggingSettingsHandler
-        is LauncherScreen.OnboardingPermissions,
-        is LauncherScreen.Housekeeping,
-        is LauncherScreen.DirectoryBrowser -> onboardingHandler
         is LauncherScreen.ScrollableScreen -> scrollableHandlerFor(screen)
         else -> object : ScreenInputHandler {}
     }
