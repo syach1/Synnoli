@@ -344,6 +344,10 @@ fun AppNavGraph(
             )
             }
             is LauncherScreen.CoreMapping -> {
+                if (inputRouter != null) {
+                    val handler = remember { inputRouter.currentHandler() }
+                    dev.cannoli.scorza.input.screen.compose.ScreenInput(handler)
+                }
                 val filterLabel = when (currentScreen.filter) {
                     1 -> "MISSING"
                     2 -> "INTERNAL"
@@ -387,6 +391,10 @@ fun AppNavGraph(
                 }
             }
             is LauncherScreen.CorePicker -> {
+                if (inputRouter != null) {
+                    val handler = remember { inputRouter.currentHandler() }
+                    dev.cannoli.scorza.input.screen.compose.ScreenInput(handler)
+                }
                 ListDialogScreen(
                     backgroundImagePath = appSettings.backgroundImagePath,
                     backgroundTint = appSettings.backgroundTint,
@@ -437,6 +445,10 @@ fun AppNavGraph(
                 }
             }
             is LauncherScreen.ColorList -> {
+                if (inputRouter != null) {
+                    val handler = remember { inputRouter.currentHandler() }
+                    dev.cannoli.scorza.input.screen.compose.ScreenInput(handler)
+                }
                 ListDialogScreen(
                     backgroundImagePath = appSettings.backgroundImagePath,
                     backgroundTint = appSettings.backgroundTint,
@@ -478,6 +490,10 @@ fun AppNavGraph(
                 }
             }
             is LauncherScreen.CollectionPicker -> {
+                if (inputRouter != null) {
+                    val handler = remember { inputRouter.currentHandler() }
+                    dev.cannoli.scorza.input.screen.compose.ScreenInput(handler)
+                }
                 ListDialogScreen(
                     backgroundImagePath = appSettings.backgroundImagePath,
                     backgroundTint = appSettings.backgroundTint,
@@ -534,6 +550,10 @@ fun AppNavGraph(
                 }
             }
             is LauncherScreen.ChildPicker -> {
+                if (inputRouter != null) {
+                    val handler = remember { inputRouter.currentHandler() }
+                    dev.cannoli.scorza.input.screen.compose.ScreenInput(handler)
+                }
                 ListDialogScreen(
                     backgroundImagePath = appSettings.backgroundImagePath,
                     backgroundTint = appSettings.backgroundTint,
@@ -571,6 +591,10 @@ fun AppNavGraph(
                 }
             }
             is LauncherScreen.AppPicker -> {
+                if (inputRouter != null) {
+                    val handler = remember { inputRouter.currentHandler() }
+                    dev.cannoli.scorza.input.screen.compose.ScreenInput(handler)
+                }
                 ListDialogScreen(
                     backgroundImagePath = appSettings.backgroundImagePath,
                     backgroundTint = appSettings.backgroundTint,
@@ -600,6 +624,10 @@ fun AppNavGraph(
                 }
             }
             is LauncherScreen.ShortcutBinding -> {
+                if (inputRouter != null) {
+                    val handler = remember { inputRouter.currentHandler() }
+                    dev.cannoli.scorza.input.screen.compose.ScreenInput(handler)
+                }
                 ListDialogScreen(
                     backgroundImagePath = appSettings.backgroundImagePath,
                     backgroundTint = appSettings.backgroundTint,
@@ -686,6 +714,10 @@ fun AppNavGraph(
                 }
             }
             is LauncherScreen.InstalledCores -> {
+                if (inputRouter != null) {
+                    val handler = remember { inputRouter.currentHandler() }
+                    dev.cannoli.scorza.input.screen.compose.ScreenInput(handler)
+                }
                 ListDialogScreen(
                     backgroundImagePath = appSettings.backgroundImagePath,
                     backgroundTint = appSettings.backgroundTint,
@@ -763,6 +795,10 @@ fun AppNavGraph(
                 )
             }
             is LauncherScreen.Credits -> {
+                if (inputRouter != null) {
+                    val handler = remember { inputRouter.currentHandler() }
+                    dev.cannoli.scorza.input.screen.compose.ScreenInput(handler)
+                }
                 CreditsOverlay(
                     selectedIndex = currentScreen.selectedIndex,
                     scrollTarget = currentScreen.scrollTarget,

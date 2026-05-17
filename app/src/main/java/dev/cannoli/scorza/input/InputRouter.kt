@@ -140,7 +140,7 @@ class InputRouter @Inject constructor(
         nav.selectHeld = false
     }
 
-    private fun currentHandler(): ScreenInputHandler = when (val screen = nav.currentScreen) {
+    fun currentHandler(): ScreenInputHandler = when (val screen = nav.currentScreen) {
         LauncherScreen.SystemList  -> systemListHandler
         LauncherScreen.GameList    -> gameListHandler
         LauncherScreen.Settings    -> settingsHandler
