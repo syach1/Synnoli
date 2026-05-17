@@ -18,6 +18,17 @@ data class DeviceMatchRule(
     val descriptor: String? = null,
 ) {
     fun score(input: MatchInput): Int {
+        // Hard reject when the rule and the input both name a device and the names disagree.
+        // Without this gate, two physically different controllers that report the same VID/PID
+        // (Retroid handhelds fake VID/PID for built-in + BT pads) and run on the same Build.MODEL
+        // score high enough on those two signals alone to inherit each other's saved mappings,
+        // even though the names plainly say they're different devices.
+        val ruleName = name
+        if (ruleName != null && ruleName.isNotEmpty() &&
+            input.name.isNotEmpty() && ruleName != input.name) {
+            return 0
+        }
+
         var score = 0
 
         // Descriptor match is the canonical signal for "same physical pad". Wins over everything
@@ -42,7 +53,6 @@ data class DeviceMatchRule(
         }
 
         // Name only scores when vid+pid did not already match; vid+pid subsumes name identity.
-        val ruleName = name
         if (!vidPidMatched && ruleName != null && ruleName.isNotEmpty() && ruleName == input.name) {
             score += 50
         }

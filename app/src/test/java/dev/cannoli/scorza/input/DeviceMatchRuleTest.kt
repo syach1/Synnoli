@@ -65,6 +65,62 @@ class DeviceMatchRuleTest {
     }
 
     @Test
+    fun named_rule_rejects_input_with_different_name_even_when_vid_pid_match() {
+        // Retroid kernel fakes the same VID/PID for the internal pad and BT pads, so a saved
+        // mapping for the internal pad would otherwise score high on VID/PID + Build.MODEL alone
+        // and adopt e.g. a Switch Pro Controller. The name disagreement must be a hard reject.
+        val rule = DeviceMatchRule(
+            name = "Retroid Pocket Controller",
+            vendorId = 8226,
+            productId = 12289,
+            androidBuildModel = "RP4PRO",
+            descriptor = "dc75afea56e3c3a269b97967aa26b8c93c0bd3fb",
+        )
+        val proPad = MatchInput(
+            name = "Nintendo Switch Pro Controller",
+            vendorId = 8226,
+            productId = 12289,
+            androidBuildModel = "RP4PRO",
+            sourceMask = 0,
+            descriptor = "c575e892a6bb353df4b1327e81beedf84b540eb4",
+        )
+        assertEquals(0, rule.score(proPad))
+    }
+
+    @Test
+    fun named_rule_still_matches_input_with_empty_name() {
+        // If the kernel leaves the device name empty, we fall back to other signals rather than
+        // rejecting; the gate only triggers when both sides name a device and the names differ.
+        val rule = DeviceMatchRule(name = "Stadia Controller", vendorId = 6353, productId = 37888)
+        val noName = device.copy(name = "")
+        assertEquals(100, rule.score(noName))
+    }
+
+    @Test
+    fun named_rule_matching_second_same_model_pad_still_scores() {
+        // Two physically distinct Pro pads share name + VID/PID and have different descriptors.
+        // The saved mapping for pad #1 should still win for pad #2 because nothing about the
+        // name signals "different device."
+        val rule = DeviceMatchRule(
+            name = "Nintendo Switch Pro Controller",
+            vendorId = 1406,
+            productId = 8201,
+            descriptor = "first-pad-descriptor",
+        )
+        val secondPad = MatchInput(
+            name = "Nintendo Switch Pro Controller",
+            vendorId = 1406,
+            productId = 8201,
+            androidBuildModel = "RP4PRO",
+            sourceMask = 0,
+            descriptor = "second-pad-descriptor",
+        )
+        // No descriptor bonus (different desc), VID/PID match +100, name skipped because VID/PID
+        // matched. Still well above zero.
+        assertEquals(100, rule.score(secondPad))
+    }
+
+    @Test
     fun rule_score_caps_at_100_plus_10() {
         val rule = DeviceMatchRule(
             name = "Stadia Controller",
