@@ -7,9 +7,11 @@ import dev.cannoli.scorza.db.CollectionsRepository
 import dev.cannoli.scorza.db.RecentlyPlayedRepository
 import dev.cannoli.scorza.db.RomScanner
 import dev.cannoli.scorza.db.RomsRepository
+import dev.cannoli.scorza.db.ScanScheduler
 import dev.cannoli.scorza.di.CannoliPathsProvider
 import dev.cannoli.scorza.model.AppType
 import dev.cannoli.scorza.model.Platform
+import dev.cannoli.scorza.scanner.RomDirectoryWatcher
 import dev.cannoli.scorza.settings.ContentMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,6 +19,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -32,9 +35,36 @@ class SystemListViewModel @Inject constructor(
     private val recentlyPlayedRepository: RecentlyPlayedRepository,
     private val platformConfig: PlatformConfig,
     private val cannoliPaths: CannoliPathsProvider,
+    private val romDirectoryWatcher: RomDirectoryWatcher,
+    private val scanScheduler: ScanScheduler,
 ) {
     private val romDirectory: File get() = cannoliPaths.romDir
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    init {
+        scope.launch {
+            scanScheduler.results.collectLatest {
+                refreshCountsForVisibleList()
+            }
+        }
+    }
+
+    private fun refreshCountsForVisibleList() {
+        scope.launch(Dispatchers.IO) {
+            val counts = romsRepository.platformCounts().mapKeys { it.key.uppercase() }
+            _state.update { current ->
+                val newItems = current.items.map { item ->
+                    if (item is ListItem.PlatformItem) {
+                        val tag = item.platform.tag.uppercase()
+                        val c = counts[tag] ?: item.platform.gameCount
+                        if (c == item.platform.gameCount) item
+                        else ListItem.PlatformItem(item.platform.copy(gameCount = c))
+                    } else item
+                }
+                current.copy(items = newItems)
+            }
+        }
+    }
 
     sealed class ListItem {
         data object RecentlyPlayedItem : ListItem()
@@ -99,8 +129,11 @@ class SystemListViewModel @Inject constructor(
             scanAllPlatformDirs { tag, current, total ->
                 withContext(Dispatchers.Main) { onProgress?.invoke(tag, current, total) }
             }
-            val countsByTag = romsRepository.platformCounts().mapKeys { it.key.uppercase() }
             val knownTagsInDb = romsRepository.knownPlatformTags()
+            val watcherTags = knownTagsInDb
+                .filter { it != TAG_TOOLS && it != TAG_PORTS && platformConfig.isKnownTag(it) }
+            romDirectoryWatcher.start(romDirectory, watcherTags)
+            val countsByTag = romsRepository.platformCounts().mapKeys { it.key.uppercase() }
             val knownTags = (knownTagsInDb + countsByTag.keys).distinct()
                 .filter { it != TAG_TOOLS && it != TAG_PORTS }
 
