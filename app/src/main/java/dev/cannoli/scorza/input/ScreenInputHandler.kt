@@ -1,5 +1,7 @@
 package dev.cannoli.scorza.input
 
+import android.view.KeyEvent
+
 interface ScreenInputHandler {
     fun onUp() {}
     fun onDown() {}
@@ -19,4 +21,7 @@ interface ScreenInputHandler {
     fun onL3() {}
     fun onR3() {}
     fun onMenu() {}
+
+    fun onRawKeyDown(keyCode: Int, event: KeyEvent): Boolean = false
+    fun onRawKeyUp(keyCode: Int, event: KeyEvent): Boolean = false
 }
