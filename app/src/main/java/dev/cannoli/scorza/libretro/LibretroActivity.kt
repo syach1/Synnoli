@@ -447,6 +447,17 @@ class LibretroActivity : ComponentActivity() {
                         Box(modifier = Modifier.fillMaxSize().background(Color.Black))
                     } else {
                         val screen = if (revealed) currentScreen else null
+                        // Push the screen's input handler into the registry. Once registered,
+                        // InputDispatcher's wired callbacks dispatch to this handler instead of
+                        // falling back to legacyNavigate. Buttons and Shortcuts stay on the
+                        // legacy onKeyDown path because they need raw event data; the dispatcher
+                        // is not invoked for those (see onKeyDown special-case).
+                        val igmHandler = androidx.compose.runtime.remember(screen) {
+                            screen?.let { igmHandlerFor(it) }
+                        }
+                        if (igmHandler != null) {
+                            dev.cannoli.scorza.input.screen.compose.ScreenInput(igmHandler)
+                        }
                         Box(modifier = Modifier.fillMaxSize()) {
                             LibretroScreen(
                                 glSurfaceView = gameView!!,
@@ -1190,11 +1201,61 @@ class LibretroActivity : ComponentActivity() {
     }
 
     /**
+     * Returns a ScreenInputHandler for [screen] that delegates each canonical event to the
+     * existing handle*Input function. Buttons and Shortcuts are intentionally not handled here:
+     * they need raw deviceId/repeatCount and stay on the legacy onKeyDown switch.
+     */
+    private fun igmHandlerFor(screen: IGMScreen): dev.cannoli.scorza.input.ScreenInputHandler? = when (screen) {
+        is IGMScreen.Menu -> simpleIgmHandler { btn -> handleMenuInput(screen, btn) }
+        is IGMScreen.Settings -> simpleIgmHandler { btn -> handleCategoryInput(screen, btn) }
+        is IGMScreen.Video -> simpleIgmHandler { btn -> handleVideoInput(screen, btn) }
+        is IGMScreen.Advanced -> simpleIgmHandler { btn -> handleAdvancedInput(screen, btn) }
+        is IGMScreen.ShaderSettings -> simpleIgmHandler { btn -> handleShaderSettingsInput(screen, btn) }
+        is IGMScreen.Emulator -> simpleIgmHandler { btn -> handleEmulatorInput(screen, btn) }
+        is IGMScreen.EmulatorCategory -> simpleIgmHandler { btn -> handleEmulatorCategoryInput(screen, btn) }
+        is IGMScreen.SavePrompt -> simpleIgmHandler { btn -> handleSavePromptInput(screen, btn) }
+        is IGMScreen.Info -> simpleIgmHandler { btn ->
+            when (btn) {
+                "btn_east", "btn_south" -> { infoScrollDir = 0; pop(); true }
+                "btn_up" -> { infoScrollDir = -1; true }
+                "btn_down" -> { infoScrollDir = 1; true }
+                else -> true
+            }
+        }
+        is IGMScreen.Achievements -> simpleIgmHandler { btn -> handleAchievementsInput(screen, btn) }
+        is IGMScreen.AchievementDetail -> simpleIgmHandler { btn -> handleAchievementDetailInput(screen, btn) }
+        is IGMScreen.GuidePicker -> simpleIgmHandler { btn -> handleGuidePickerInput(screen, btn) }
+        is IGMScreen.Guide -> simpleIgmHandler { btn -> handleGuideInput(screen, btn) }
+        is IGMScreen.ReassignPlayers -> simpleIgmHandler { btn -> handleReassignPlayersInput(screen, btn) }
+        is IGMScreen.Buttons -> null  // raw event path; handled in onKeyDown special-case
+        is IGMScreen.Shortcuts -> null  // raw event path; handled in onKeyDown special-case
+    }
+
+    private fun simpleIgmHandler(onButton: (String) -> Boolean): dev.cannoli.scorza.input.ScreenInputHandler =
+        object : dev.cannoli.scorza.input.ScreenInputHandler {
+            override fun onUp() { onButton("btn_up") }
+            override fun onDown() { onButton("btn_down") }
+            override fun onLeft() { onButton("btn_left") }
+            override fun onRight() { onButton("btn_right") }
+            override fun onConfirm() { onButton("btn_south") }
+            override fun onBack() { onButton("btn_east") }
+            override fun onStart() { onButton("btn_start") }
+            override fun onSelect() { onButton("btn_select") }
+            override fun onWest() { onButton("btn_west") }
+            override fun onNorth() { onButton("btn_north") }
+            override fun onL1() { onButton("btn_l") }
+            override fun onR1() { onButton("btn_r") }
+            override fun onL2() { onButton("btn_l2") }
+            override fun onR2() { onButton("btn_r2") }
+        }
+
+    /**
      * Routes a semantic button event into the existing per-screen handle*Input switch. The IGM
      * string vocabulary (post-resolveNavButton swap) treats "btn_south" as semantic confirm and
      * "btn_east" as semantic back, which is what the dispatcher's onConfirm/onBack already
      * provide via mapping.menuConfirm. Returns false for screens that depend on raw event details
-     * (Buttons, Shortcuts) -- those stay on the legacy onKeyDown switch path.
+     * (Buttons, Shortcuts) -- those stay on the legacy onKeyDown switch path. Also kept as the
+     * dispatcher's fallback when no ScreenInput is pushed (defensive).
      */
     private fun legacyNavigate(button: String): Boolean {
         val screen = currentScreen ?: return false
