@@ -8,7 +8,7 @@ import dev.cannoli.scorza.config.CannoliPaths
 import dev.cannoli.scorza.config.PlatformConfig
 import dev.cannoli.scorza.db.CannoliDatabase
 import dev.cannoli.scorza.db.CollectionsRepository
-import dev.cannoli.scorza.db.RomScanner
+import dev.cannoli.scorza.db.ScanScheduler
 import dev.cannoli.scorza.db.RomsRepository
 import dev.cannoli.scorza.db.importer.ImportProgress
 import dev.cannoli.scorza.db.importer.ImportResult
@@ -47,7 +47,7 @@ class BootInitializer @Inject constructor(
     private val settings: SettingsRepository,
     private val platformConfig: PlatformConfig,
     private val cannoliDatabase: CannoliDatabase,
-    private val romScanner: RomScanner,
+    private val scanScheduler: ScanScheduler,
     private val cannoliPaths: CannoliPathsProvider,
     @IoScope private val ioScope: CoroutineScope,
     private val installedCoreService: InstalledCoreService,
@@ -80,7 +80,7 @@ class BootInitializer @Inject constructor(
             romDirectory = romDir,
             db = cannoliDatabase,
             platformConfig = platformConfig,
-            romScanner = romScanner,
+            scanScheduler = scanScheduler,
             onProgress = ImportProgress { progress, label ->
                 onPhase(importPhase, progress, label)
             },

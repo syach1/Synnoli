@@ -6,7 +6,7 @@ import dev.cannoli.scorza.config.CannoliPaths
 import dev.cannoli.scorza.config.PlatformConfig
 import dev.cannoli.scorza.db.CannoliDatabase
 import dev.cannoli.scorza.db.LibraryRef
-import dev.cannoli.scorza.db.RomScanner
+import dev.cannoli.scorza.db.ScanScheduler
 import dev.cannoli.scorza.db.execute
 import dev.cannoli.scorza.db.executeReturningId
 import dev.cannoli.scorza.db.query
@@ -33,7 +33,7 @@ class Importer(
     private val romDirectory: File,
     private val db: CannoliDatabase,
     private val platformConfig: PlatformConfig,
-    private val romScanner: RomScanner,
+    private val scanScheduler: ScanScheduler,
     private val onProgress: ImportProgress,
 ) {
     private val paths = CannoliPaths(cannoliRoot)
@@ -149,7 +149,7 @@ class Importer(
         for ((index, tag) in tags.withIndex()) {
             val upperTag = tag.uppercase()
             try {
-                romScanner.scanPlatform(upperTag, isArcade = platformConfig.isArcade(upperTag))
+                scanScheduler.runNow(upperTag)
             } catch (t: Throwable) {
                 ScanLog.write("WARN scanPlatform $upperTag failed during import: ${t.message}")
             }
