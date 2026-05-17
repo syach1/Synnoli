@@ -57,6 +57,8 @@ class RomScanner(
 
     fun ensureReservedPlatformTag(tag: String) = ensurePlatformRow(tag)
 
+    fun lastScannedMtime(platformTag: String): Long = readLastScannedMtime(platformTag.uppercase())
+
     private fun readLastScannedMtime(tag: String): Long = db.queryOne(
         "SELECT last_scanned_mtime FROM platforms WHERE tag = ?", tag,
     ) { it.getLong(0) } ?: MTIME_UNSET
