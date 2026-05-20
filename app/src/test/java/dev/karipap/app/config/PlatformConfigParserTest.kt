@@ -1,0 +1,106 @@
+package dev.karipap.app.config
+
+import android.content.Intent
+import org.json.JSONObject
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
+class PlatformConfigParserTest {
+
+    private fun parse(json: String): AppConfig =
+        PlatformConfig.parseAppConfigForTest(JSONObject(json))
+
+    @Test fun `bare package only`() {
+        val cfg = parse("""{"package":"com.example"}""")
+        assertEquals("com.example", cfg.packageName)
+        assertNull(cfg.activity)
+        assertEquals(Intent.ACTION_VIEW, cfg.action)
+        assertTrue(cfg.data is DataBinding.None)
+        assertTrue(cfg.extras.isEmpty())
+        assertEquals("*/*", cfg.mimeType)
+        assertEquals(LaunchMethod.INTENT, cfg.launchMethod)
+    }
+
+    @Test fun `nethersx2 entry parses`() {
+        val cfg = parse("""
+            {
+              "package": "xyz.aethersx2.android",
+              "activity": "xyz.aethersx2.android.EmulationActivity",
+              "action": "android.intent.action.MAIN",
+              "extras": [{"key": "bootPath", "kind": "uri_string"}],
+              "launchMethod": "intent"
+            }
+        """.trimIndent())
+        assertEquals("xyz.aethersx2.android", cfg.packageName)
+        assertEquals("xyz.aethersx2.android.EmulationActivity", cfg.activity)
+        assertEquals(Intent.ACTION_MAIN, cfg.action)
+        assertEquals(1, cfg.extras.size)
+        assertEquals("bootPath", cfg.extras[0].key)
+        assertEquals(ExtraValueKind.FILE_URI_STRING, cfg.extras[0].kind)
+        assertEquals(LaunchMethod.INTENT, cfg.launchMethod)
+    }
+
+    @Test fun `dolphin entry with shell launch`() {
+        val cfg = parse("""
+            {
+              "package": "org.dolphinemu.dolphinemu",
+              "activity": "org.dolphinemu.dolphinemu.ui.main.MainActivity",
+              "action": "android.intent.action.MAIN",
+              "extras": [{"key": "AutoStartFile", "kind": "uri_string"}],
+              "launchMethod": "shell"
+            }
+        """.trimIndent())
+        assertEquals(LaunchMethod.SHELL, cfg.launchMethod)
+    }
+
+    @Test fun `file_provider data with grant default true`() {
+        val cfg = parse("""{"package":"com.sky.SkyEmu","data":{"kind":"file_provider"}}""")
+        val data = cfg.data as DataBinding.FileProvider
+        assertTrue(data.grantPermission)
+    }
+
+    @Test fun `custom_scheme data parses scheme and authority`() {
+        val cfg = parse("""
+            {"package":"com.pixelrespawn.linkboy",
+             "data":{"kind":"custom_scheme","scheme":"linkboy","authority":"emulator"}}
+        """.trimIndent())
+        val data = cfg.data as DataBinding.CustomScheme
+        assertEquals("linkboy", data.scheme)
+        assertEquals("emulator", data.authority)
+    }
+
+    @Test fun `extras list parses uri_parcelable kind`() {
+        val cfg = parse("""
+            {"package":"me.magnum.melonds",
+             "extras":[{"key":"uri","kind":"uri_parcelable"}]}
+        """.trimIndent())
+        assertEquals(ExtraValueKind.FILE_URI_PARCELABLE, cfg.extras[0].kind)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `unknown extra kind throws`() {
+        parse("""{"package":"com.example","extras":[{"key":"k","kind":"weird"}]}""")
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `unknown data kind throws`() {
+        parse("""{"package":"com.example","data":{"kind":"saf"}}""")
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `missing package throws`() {
+        parse("""{"action":"android.intent.action.VIEW"}""")
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `unknown launchMethod throws`() {
+        parse("""{"package":"com.example","launchMethod":"fork"}""")
+    }
+}

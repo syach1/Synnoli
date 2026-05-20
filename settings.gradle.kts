@@ -22,7 +22,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Cannoli"
+rootProject.name = "Karipap"
 include(":app")
 include(":cannoli-ui")
 include(":cannoli-igm")

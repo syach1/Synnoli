@@ -1,5 +1,5 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <string name="app_name" translatable="false">Cannoli</string>
+    <string name="app_name" translatable="false">Karipap</string>
 
     <!-- Bottom bar labels -->
     <string name="label_back">BACK</string>
@@ -43,7 +43,7 @@
     <string name="label_set">SET</string>
     <string name="label_clear">CLEAR</string>
     <string name="label_press">PRESS</string>
-    <string name="label_kitchen">KITCHEN</string>
+    <string name="label_kitchen">FILE SERVER</string>
     <string name="label_hold_buttons" tools:ignore="TypographyEllipsis">HOLD ONE OR MORE BUTTONS...</string>
     <string name="label_confirm_delete">CONFIRM DELETE</string>
     <string name="label_info">INFO</string>
@@ -68,6 +68,7 @@
     <string name="shortcut_action_save_and_quit">Save and Quit</string>
     <string name="shortcut_action_cycle_scaling">Cycle Scaling</string>
     <string name="shortcut_action_cycle_shader">Cycle Shader</string>
+    <string name="shortcut_action_show_fps">Show FPS</string>
     <string name="shortcut_action_toggle_ff">Toggle Fast Forward</string>
     <string name="shortcut_action_hold_ff">Hold Fast Forward</string>
     <string name="shortcut_action_open_guide">Open Guide</string>
@@ -85,7 +86,7 @@
     <string name="settings_debug">Debug</string>
     <string name="settings_retroachievements" translatable="false">RetroAchievements</string>
     <string name="settings_about">About</string>
-    <string name="settings_kitchen" translatable="false">Nonna\'s Kitchen</string>
+    <string name="settings_kitchen" translatable="false">File Server</string>
     <string name="settings_install_update">Install Update</string>
     <string name="settings_release_channel">Release Channel</string>
 
@@ -176,7 +177,7 @@
     <string name="setting_main_menu_quit">Main Menu Quit</string>
     <string name="setting_always_save_on_quit">Save State On Quit</string>
     <string name="setting_retroarch_diy_mode">RetroArch DIY Mode</string>
-    <string name="setting_kitchen_code_bypass">Kitchen Code Bypass</string>
+    <string name="setting_kitchen_code_bypass">File Server Code Bypass</string>
     <string name="setting_set_default_launcher">Set as Default Launcher</string>
     <string name="setting_content_mode">Content Mode</string>
     <string name="setting_fgh_collection">5GH Collection</string>
@@ -198,12 +199,21 @@
     <string name="setting_installed_cores">%s Installed Cores</string>
     <string name="title_installed_cores">%s Installed Cores</string>
     <string name="installed_cores_none">No cores found</string>
-    <string name="setting_sd_root">Cannoli Root</string>
+    <string name="setting_sd_root">Karipap Root</string>
     <string name="setting_rom_directory">ROM Directory</string>
+    <string name="setting_bios_directory">BIOS Directory</string>
     <string name="setting_ra_package">RetroArch Package</string>
     <string name="setting_rebuild_cache">Rebuild Cache</string>
+    <string name="setting_artwork_scraper">Artwork Scraper</string>
     <string name="setting_scan_library">Scan Mode</string>
     <string name="setting_refresh_library">Refresh Library</string>
+    <string name="title_artwork_scraper">Artwork Scraper</string>
+    <string name="artwork_scraper_scanning">Scanning ROM directory...</string>
+    <string name="artwork_scraper_empty">No ROMs found</string>
+    <string name="artwork_scraper_cache_note">Cache covers locally</string>
+    <string name="artwork_source_libretro">Try Libretro thumbnails</string>
+    <string name="artwork_source_thegamesdb">Try TheGamesDB API</string>
+    <string name="artwork_source_dsess">Try DSESS-style HTML selector scraper</string>
     <string name="value_automatically">Automatically</string>
     <string name="value_manually">Manually</string>
     <string name="setting_ra_username">Username</string>
@@ -232,7 +242,7 @@
     <string name="value_hide">Hide</string>
     <string name="value_none">None</string>
     <string name="value_selected">Selected</string>
-    <string name="value_cannoli_root">Cannoli Root</string>
+    <string name="value_cannoli_root">Karipap Root</string>
     <string name="value_platforms">Default</string>
     <string name="value_collections">Collections Only</string>
     <string name="value_five_game_handheld">Five Game Handheld</string>
@@ -280,10 +290,10 @@
     <string name="battery_level">%1$d%%</string>
 
     <!-- Onboarding wizard -->
-    <string name="onboarding_header">SET UP CANNOLI</string>
+    <string name="onboarding_header">SET UP KARIPAP</string>
     <string name="onboarding_permissions_title">Permissions and Storage</string>
     <string name="onboarding_storage_label">Storage access</string>
-    <string name="onboarding_storage_rationale">Cannoli needs access to your ROMs, saves, art, and more.\nWithout this, Cannoli cannot do anything.</string>
+    <string name="onboarding_storage_rationale">Karipap needs access to your ROMs, saves, art, and more.\nWithout this, Karipap cannot do anything.</string>
     <string name="onboarding_status_granted">Granted</string>
     <string name="onboarding_status_not_granted">Not granted</string>
     <string name="onboarding_press_a_to_grant">Press A to grant</string>
@@ -306,12 +316,12 @@
     <string name="label_collections">Collections</string>
 
     <!-- About -->
-    <string name="about_title">Cannoli</string>
-    <string name="about_description">A frontend with just the right amount of filling!</string>
-    <string name="about_website">cannoli.dev</string>
+    <string name="about_title">Karipap</string>
+    <string name="about_description">A hard fork of Cannoli with different frontend opinions.</string>
+    <string name="about_website">Upstream: github.com/CannoliHQ/cannoli / cannoli.dev</string>
 
-    <!-- Kitchen -->
-    <string name="kitchen_title">Nonna\'s Kitchen</string>
+    <!-- File Server -->
+    <string name="kitchen_title">File Server</string>
 
     <!-- RetroAchievements -->
     <string name="ra_title">RetroAchievements</string>

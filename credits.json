@@ -1,10 +1,11 @@
 {
   "inspiration": [
-    {"name":  "Hallie", "detail":  "My beautiful wife who makes me better in every way"},
-    { "name": "Shaun Inman", "detail": "MinUI" },
-    {"name":  "Abraham McCampbell", "detail":  "Cannoli Logo"}
+    { "name": "Karipap", "detail": "Hard fork of Cannoli with different frontend opinions" },
+    { "name": "CannoliHQ/cannoli", "detail": "Upstream project: https://github.com/CannoliHQ/cannoli" },
+    { "name": "Cannoli website", "detail": "https://cannoli.dev" }
   ],
   "fonts": [
+    { "name": "JetBrains Mono", "what": "JetBrainsMono Nerd Font", "license": "OFL" },
     { "name": "M+ Fonts Project", "what": "M PLUS 1 Code", "license": "OFL" },
     { "name": "BPreplay", "what": "BPreplay Unhinted", "license": "OFL" },
     { "name": "Nerd Fonts", "what": "NerdSymbols", "license": "OFL" }
@@ -36,7 +37,7 @@
   ],
   "shaders": [
     { "name": "EasyMode", "shader": "crt-aperture", "license": "GPL" },
-    { "name": "Cannoli (based on EasyMode)", "shader": "crt-cannoli", "license": "GPL" },
+    { "name": "upstream Cannoli (based on EasyMode)", "shader": "crt-cannoli", "license": "GPL" },
     { "name": "EasyMode", "shader": "crt-easymode", "license": "GPL" },
     { "name": "cgwg / Themaister / DOLLS", "shader": "crt-geom", "license": "GPLv2" },
     { "name": "Timothy Lottes / hunterk", "shader": "crt-lottes-fast", "license": "Public domain" },

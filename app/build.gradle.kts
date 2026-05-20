@@ -23,7 +23,7 @@ val keystoreProperties = Properties().apply {
 }
 
 android {
-    namespace = "dev.cannoli.scorza"
+    namespace = "dev.karipap.app"
     compileSdk {
         version = release(36) {
             minorApiLevel = 1
@@ -31,11 +31,11 @@ android {
     }
 
     defaultConfig {
-        applicationId = "dev.cannoli.scorza"
+        applicationId = "dev.karipap.app"
         minSdk = 28
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 1060005
+        versionName = "1.0.0-RC1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -51,6 +51,8 @@ android {
 
         buildConfigField("String", "BUILD_DATE", "\"${buildDate()}\"")
         buildConfigField("String", "GIT_HASH", "\"${gitCommitHash()}\"")
+        buildConfigField("String", "UPDATE_FEED_URL", "\"\"")
+        buildConfigField("String", "UPDATE_DOWNLOAD_BASE_URL", "\"\"")
     }
 
     buildFeatures {
@@ -123,6 +125,7 @@ dependencies {
     implementation("com.google.zxing:core:3.5.3")
     implementation("org.apache.commons:commons-compress:1.27.1")
     implementation("org.tukaani:xz:1.10")
+    implementation("org.jsoup:jsoup:1.18.3")
     implementation("io.legere:pdfiumandroid:1.0.35")
     implementation("com.google.oboe:oboe:1.9.3")
     testImplementation(libs.junit)

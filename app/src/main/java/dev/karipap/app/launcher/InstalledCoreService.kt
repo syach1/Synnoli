@@ -1,0 +1,101 @@
+package dev.karipap.app.launcher
+
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Handler
+import android.os.Looper
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.suspendCancellableCoroutine
+import javax.inject.Inject
+import javax.inject.Singleton
+import kotlin.coroutines.resume
+
+@Singleton
+class InstalledCoreService @Inject constructor(@ApplicationContext private val context: Context) {
+
+    private val handler = Handler(Looper.getMainLooper())
+
+    @Volatile
+    var installedCores: Map<String, Set<String>> = emptyMap()
+        private set
+
+    @Volatile
+    var unresponsivePackages: Set<String> = emptySet()
+        private set
+
+    @Volatile
+    var cacheReady: Boolean = false
+        private set
+
+    suspend fun queryAllPackages() {
+        val result = mutableMapOf<String, Set<String>>()
+        val unresponsive = mutableSetOf<String>()
+        for (pkg in discoverRaPackages()) {
+            val cores = queryPackage(pkg)
+            if (cores.isNotEmpty()) result[pkg] = cores
+            else unresponsive.add(pkg)
+        }
+        installedCores = result
+        unresponsivePackages = unresponsive
+        cacheReady = true
+    }
+
+    private fun discoverRaPackages(): List<String> {
+        return context.packageManager.getInstalledPackages(0)
+            .map { it.packageName }
+            .filter { it.startsWith("com.retroarch") || it.startsWith("dev.cannoli.ricotta") }
+    }
+
+    private suspend fun queryPackage(pkg: String, timeoutMs: Long = 3000L): Set<String> =
+        suspendCancellableCoroutine { cont ->
+            val token = Any()
+            val receiver = object : BroadcastReceiver() {
+                override fun onReceive(ctx: Context, intent: Intent) {
+                    val cores = intent.getStringArrayExtra("CORES")
+                        ?.map { soToCoreId(it) }?.toSet() ?: emptySet()
+                    handler.removeCallbacksAndMessages(token)
+                    try { context.unregisterReceiver(this) } catch (_: Exception) {}
+                    if (cont.isActive) cont.resume(cores)
+                }
+            }
+
+            context.registerReceiver(
+                receiver,
+                IntentFilter("com.retroarch.INSTALLED_CORES_RESULT"),
+                Context.RECEIVER_EXPORTED
+            )
+
+            context.sendBroadcast(Intent("com.retroarch.QUERY_INSTALLED_CORES").apply {
+                setPackage(pkg)
+            })
+
+            handler.postAtTime({
+                try { context.unregisterReceiver(receiver) } catch (_: Exception) {}
+                if (cont.isActive) cont.resume(emptySet())
+            }, token, android.os.SystemClock.uptimeMillis() + timeoutMs)
+
+            cont.invokeOnCancellation {
+                try { context.unregisterReceiver(receiver) } catch (_: Exception) {}
+                handler.removeCallbacksAndMessages(token)
+            }
+        }
+
+    fun hasCoreInPackage(coreId: String, pkg: String): Boolean =
+        installedCores[pkg]?.contains(coreId) == true
+
+    companion object {
+        private val PACKAGE_LABELS = mapOf(
+            "dev.cannoli.ricotta.aarch64" to "RicottaArch",
+            "dev.cannoli.ricotta" to "RicottaArch",
+            "com.retroarch.aarch64" to "RetroArch",
+            "com.retroarch" to "RetroArch"
+        )
+
+        fun getPackageLabel(pkg: String): String = PACKAGE_LABELS[pkg] ?: pkg
+
+        fun soToCoreId(filename: String): String =
+            filename.removeSuffix("_android.so").removeSuffix(".so")
+    }
+}

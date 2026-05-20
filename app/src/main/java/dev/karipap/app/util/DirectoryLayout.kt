@@ -1,0 +1,46 @@
+package dev.karipap.app.util
+
+import android.content.res.AssetManager
+import dev.karipap.app.config.CannoliPaths
+import dev.karipap.app.config.PlatformConfig
+import java.io.File
+
+object DirectoryLayout {
+    fun ensure(cannoliRoot: File, romDirectory: File, assets: AssetManager, platformConfig: PlatformConfig) {
+        val paths = CannoliPaths(cannoliRoot)
+        listOf(
+            paths.artDir,
+            paths.savesDir,
+            paths.saveStatesDir,
+            paths.mediaScreenshotsDir,
+            paths.mediaRecordingsDir,
+            paths.configDir,
+            paths.configState,
+            paths.configRetroArch,
+            paths.configOverrides,
+            paths.configOverridesCores,
+            paths.configOverridesSystems,
+            paths.configOverridesGames,
+            paths.configInputMappings,
+            paths.backupDir,
+            paths.guidesDir,
+            paths.wallpapersDir,
+        ).forEach { it.mkdirs() }
+
+        val arcadeMap = paths.arcadeMapFile
+        if (!arcadeMap.exists()) {
+            try {
+                assets.open("arcade_map.txt").use { input ->
+                    arcadeMap.outputStream().use { input.copyTo(it) }
+                }
+            } catch (_: Exception) {}
+        }
+
+        for (tag in platformConfig.getAllTags()) {
+            paths.artFor(tag).mkdirs()
+            paths.savesFor(tag).mkdirs()
+            paths.saveStatesFor(tag).mkdirs()
+            paths.guidesFor(tag).mkdirs()
+        }
+    }
+}

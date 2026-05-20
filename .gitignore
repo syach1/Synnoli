@@ -1,5 +1,6 @@
 *.iml
 .gradle
+.kotlin/
 /build
 /captures
 
@@ -7,17 +8,22 @@
 .cxx
 local.properties
 keystore.properties
+*.jks
+*.idsig
+android-sdk/
 
 .idea/
 .DS_Store
 
 app/src/main/jniLibs/
 *.spv
+*.apk
 romm_cache.db
 
-# Populated by scripts/fetch-autoconfig.sh from the CannoliHQ fork of
-# libretro/retroarch-joypad-autoconfig. Not tracked in git.
+# Populated by scripts/fetch-autoconfig.sh from libretro/retroarch-joypad-autoconfig.
+# Not tracked in git.
 app/src/main/assets/autoconfig/
+app/src/main/assets/dexopt/
 
-# Built by CI from the CannoliHQ/kitchen repo. Not tracked in git.
+# Built externally for release bundles. Not tracked in git.
 app/src/main/assets/kitchen/

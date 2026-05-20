@@ -1,68 +1,70 @@
-<div align="center">
+# Karipap
 
-<img src=".github/resources/logo.png" width="256px" alt="A cannoli you silly goose!">
-<h3 style="font-size:35px; padding-top:0px; padding-bottom:0px; margin-bottom: 0px; margin-top: 5px;">
-Cannoli
-</h3>
+Karipap is an Android retro-gaming frontend forked from Cannoli.
 
-<h4 style="font-size:18px; padding-top:0px; margin-top:0px;">A frontend with just the right amount of filling!</h4>
+This is a hard fork with different frontend opinions. It keeps Cannoli's Android foundation, built-in libretro direction, and external-emulator launching model, but changes the library scanner, BIOS handling, in-game menu behavior, and several UX defaults to better fit this build.
 
-<a href="LICENSE"><img src="https://img.shields.io/github/license/CannoliHQ/cannoli?style=for-the-badge&labelColor=E8C896&color=555555" height="36" alt="License"></a>
-<a href="https://github.com/CannoliHQ/cannoli/stargazers"><img src="https://img.shields.io/github/stars/CannoliHQ/cannoli?style=for-the-badge&labelColor=E8C896&color=555555" height="36" alt="Stars"></a>
-<a href="https://github.com/CannoliHQ/cannoli/releases"><img src="https://img.shields.io/github/downloads/CannoliHQ/cannoli/total?style=for-the-badge&labelColor=E8C896&color=555555" height="36" alt="Downloads"></a>
-<a href="https://cannoli.dev"><img src="https://img.shields.io/badge/Docs-cannoli.dev-555555?style=for-the-badge&labelColor=E8C896" height="36" alt="Docs"></a>
+Upstream Cannoli:
 
-</div>
+- GitHub: https://github.com/CannoliHQ/cannoli
+- Website: https://cannoli.dev
 
----
+## Current Focus
 
-# What is Cannoli?
+- Android frontend for ROM libraries, external emulators, and bundled libretro cores.
+- Less opinionated ROM folder handling.
+- No automatic creation of platform/game/BIOS subfolders.
+- Explicit ROM and BIOS directory settings.
+- First-run setup asks for storage permission, ROM directory, and BIOS directory.
+- Practical built-in libretro improvements for handheld/frontend use.
 
-Cannoli is an opinionated retro gaming setup for Android.
+## Changes In This Fork
 
-It comes with [built-in libretro cores](https://cannoli.dev/documentation/platforms/) and can also launch RetroArch / Standalone emulators like a traditional frontend.
+- Added a separate `BIOS Directory` setting under Library.
+- First-run setup now lets the user choose ROM and BIOS directories instead of silently assuming pre-made folders.
+- Built-in libretro BIOS lookup now scans the selected BIOS folder and its subfolders.
+- Firmware is staged into the app cache using core-declared BIOS names so cores can find files even when the user's folder layout or file casing differs.
+- Built-in libretro JNI exports now match the Karipap package namespace.
+- Disabled automatic creation of ROM, BIOS, and per-game subfolders.
+- Scanner now detects games by file/content where possible instead of requiring exact folder names.
+- Scanner is limited to the selected ROM directory and subfolders, not the whole storage root.
+- Fixed case/alias duplicate issues such as `GB` vs `gb`, `psx` vs `PlayStation`, `sfc` vs `SNES`, `megadrive` vs `Genesis`, and other common frontend folder names.
+- Platform menus strip known platform folder aliases so games show directly instead of being hidden behind an extra alias folder.
+- Fixed PlayStation games under a `psx` folder showing as a nested `psx` folder in the PlayStation menu.
+- Added and fixed built-in libretro analog handling, including PlayStation BIOS detection for PCSX-ReARMed.
+- Built-in libretro core options are applied before core init so PCSX-ReARMed can honor BIOS boot-logo settings at startup.
+- PCSX-ReARMed built-in launches default to real BIOS auto-detection with the PlayStation startup logo enabled; SwanStation fast boot is disabled by default.
+- The native core-option cache reflects startup overrides so the in-game menu shows the active values.
+- Upstream Cannoli auto-update endpoints are disabled by default so fork builds do not offer upstream APK updates.
+- Added more in-game video scaling options for built-in libretro cores.
+- Added `Show FPS` to in-game shortcut settings and fixed fast-forward FPS reporting.
+- Added artwork scraping from the selected ROM directory only, with local cover caching.
+- Moved `Refresh Library` to `Settings > Advanced`.
+- Tuned launcher analog-stick menu navigation to reduce accidental double-scrolls.
+- Set JetBrainsMono Nerd Font as the default bundled UI font.
 
----
+## Artwork Scraper
 
-# What does it look like?
+Artwork scraping is ROM-driven: Karipap only offers scraper entries for platforms that have ROMs in the selected ROM directory. Sources are attempted as local-cache downloads rather than permanent hotlinks where allowed:
 
-<p align="center">
-<a href=".github/resources/screenshots/main_menu.png"><img src=".github/resources/screenshots/main_menu.png" width="30%"></a>
-<a href=".github/resources/screenshots/favorites.png"><img src=".github/resources/screenshots/favorites.png" width="30%"></a>
-<a href=".github/resources/screenshots/igm.png"><img src=".github/resources/screenshots/igm.png" width="30%"></a>
-</p>
+- Libretro thumbnails
+- TheGamesDB API
+- DSESS-style HTML selector scraper
 
----
+Respect upstream source terms, robots.txt, rate limits, and attribution requirements.
 
-# Why make another frontend?
+## Storage Compatibility
 
-`¯\_(ツ)_/¯`
+Fresh setups use a Karipap root by default and ask for explicit ROM and BIOS folders. Legacy `Synnoli` and `Cannoli` root names remain in code only as compatibility fallbacks for existing user data and migrations; they are not presented as the new frontend identity.
 
-I adore [MinUI](https://github.com/shauninman/MinUI) by [Shaun Inman](https://github.com/shauninman). No fuss, a focused
-feature set, and unapologetically opinionated.
+## Release Updates
 
-Without his masterpiece this derivative would not exist.
+Karipap does not point at Cannoli's update feed. To publish update checks for your own GitHub releases, configure `UPDATE_FEED_URL` and `UPDATE_DOWNLOAD_BASE_URL` in `app/build.gradle.kts` and host a compatible `versions.json` feed.
 
-For that I thank him, and apologize for the bastardization that follows.
+## Credits
 
-Since purchasing a Retroid Pocket Classic I've been yearning for MinUI's simplicity.
+Karipap is based on Cannoli by CannoliHQ. Third-party libraries, bundled cores, fonts, and shaders retain their original licenses and credit entries in the app.
 
-**This is my attempt to bring that experience to Android.**
+## License
 
----
-
-# Design Goals
-
-- Play Some Damn Games!
-- Minimal Configuration
-- Easy to add new games
-- Basic features baked in
-- Judicious addition of new features
-
----
-
-# Spread Joy!
-
-I've spent a lot of time building Cannoli.
-
-If you enjoy using it and feel inclined to pay it forward, go do something nice for someone! ❤️
+This fork follows the upstream license terms in `LICENSE` and preserves third-party license obligations for bundled dependencies, cores, shaders, and assets.
